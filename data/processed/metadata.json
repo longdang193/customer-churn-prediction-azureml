@@ -1,0 +1,20 @@
+{
+  "feature_names": [
+    "CreditScore",
+    "Geography",
+    "Gender",
+    "Age",
+    "Tenure",
+    "Balance",
+    "NumOfProducts",
+    "HasCrCard",
+    "IsActiveMember",
+    "EstimatedSalary"
+  ],
+  "target_name": "Exited",
+  "n_features": 10,
+  "n_train": 8000,
+  "n_test": 2000,
+  "test_size": 0.2,
+  "random_state": 42
+}

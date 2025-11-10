@@ -1,0 +1,22 @@
+# Evaluation Configuration
+
+evaluation:
+  # Visualization settings
+  visualizations:
+    confusion_matrix: true
+    roc_curve: true
+    precision_recall_curve: true
+    prediction_distribution: true
+    feature_importance: true
+  
+  # Feature importance
+  top_n_features: 10
+  
+  # Output settings
+  save_report: true
+  save_plots: true
+  plot_dpi: 300
+  
+  # Classification threshold
+  threshold: 0.5
+

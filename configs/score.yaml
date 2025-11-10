@@ -1,0 +1,18 @@
+# Scoring Configuration
+
+scoring:
+  # Classification threshold
+  threshold: 0.5
+  
+  # Include probability scores
+  include_probability: true
+  
+  # Output format
+  output_format: "csv"  # Options: "csv", "json"
+  
+  # Batch processing
+  batch_size: null  # null = process all at once
+  
+  # Preprocessing
+  remove_uninformative_columns: true
+

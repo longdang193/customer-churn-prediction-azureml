@@ -1,0 +1,52 @@
+# Training Configuration
+# Controls training behavior and reproducibility
+
+training:
+  # Models to train
+  models:
+    - "logreg"
+    - "rf"
+    # - "xgboost"  # Uncomment if XGBoost is installed
+  
+  # Class imbalance handling
+  class_weight: "balanced"  # Options: "balanced", None, or dict
+  
+  # Random seed for reproducibility
+  random_state: 42
+  
+  # SMOTE for oversampling (optional)
+  use_smote: false
+  
+  # Hyperparameters
+  hyperparameters:
+    logreg:
+      C: 1.0
+      max_iter: 1000
+      solver: "lbfgs"
+    
+    rf:
+      n_estimators: 100
+      max_depth: 10
+      min_samples_split: 10
+      min_samples_leaf: 4
+      max_features: "sqrt"
+    
+    xgboost:
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      subsample: 0.8
+      colsample_bytree: 0.8
+
+# MLflow configuration
+mlflow:
+  enabled: false
+  experiment_name: "churn-prediction"
+  tracking_uri: null  # Set to Azure ML tracking URI if using Azure ML
+
+# Output configuration
+output:
+  model_dir: "models/local"
+  save_metrics: true
+  save_comparison: true
+
