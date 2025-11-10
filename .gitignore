@@ -1,0 +1,48 @@
+# Environment variables and secrets
+config.env
+.env
+.env.local
+
+# Azure ML
+.azureml/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data files
+*.csv
+!data/sample.csv
+
+# Model artifacts
+models/
+*.pkl
+*.joblib
+*.h5
+*.pt
+
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Build
+build/
+dist/
+*.egg-info/
+
