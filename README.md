@@ -1,130 +1,138 @@
-# Customer Churn Prediction with Azure ML
+# Bank Customer Churn Prediction with Azure ML
 
-MLOps pipeline for predicting bank customer churn using Azure Machine Learning.
+This project demonstrates an end-to-end MLOps pipeline for predicting bank customer churn using Azure Machine Learning. It covers data preparation, model training, evaluation, and scoring, all organized into a clean, reproducible structure.
 
 ## Project Overview
 
-This project implements a complete MLOps pipeline for customer churn prediction, following best practices for machine learning operations on Azure.
+The goal is to predict whether a bank customer will churn (exit) based on their attributes. This is a binary classification problem. The pipeline is designed to be run both locally for development and on Azure ML for production-scale training and deployment.
+
+### Key Features
+
+- **End-to-End Pipeline**: Scripts for data prep, training, evaluation, and scoring.
+- **Configuration Driven**: YAML files in `configs/` control the pipeline's behavior.
+- **MLflow Integrated**: Automated experiment tracking for parameters, metrics, and model artifacts.
+- **Multiple Models**: Supports Logistic Regression, Random Forest, and XGBoost.
+- **Testing**: Includes unit tests (`pytest`) and a robust end-to-end smoke test.
+- **Dockerized Environment**: A `Dockerfile` ensures a reproducible environment for local and cloud execution.
+- **Azure ML Ready**: Includes component definitions (`aml/`) and a pipeline script (`run_pipeline.py`) for easy deployment on Azure.
 
 ## Project Structure
 
 ```
 .
-├── data/                    # Data files (sample dataset)
-├── notebooks/               # Jupyter notebooks for EDA
-├── src/                     # Source code (to be created)
-├── environment/             # Environment configuration (to be created)
-├── setup.sh                 # Azure ML setup script
-├── config.env.example       # Configuration template
-└── README.md               # This file
+├── aml/                  # Azure ML component and pipeline definitions
+├── configs/              # YAML configuration files for the pipeline
+├── data/                 # Raw and sample data
+├── docs/                 # Detailed project documentation
+├── evaluation/           # (Git-ignored) Evaluation reports and plots
+├── models/               # (Git-ignored) Trained model artifacts
+├── notebooks/            # Jupyter notebooks for EDA
+├── predictions/          # (Git-ignored) Scored model outputs
+├── setup/                # Scripts for setting up local and Azure environments
+├── src/                  # Python source code for the ML pipeline
+│   ├── models/           # Model definitions
+│   ├── config_loader.py  # Utility for loading YAML configs
+│   ├── data_prep.py      # Data preparation script
+│   ├── train.py          # Model training script
+│   ├── evaluate.py       # Model evaluation script
+│   └── score.py          # Model scoring/inference script
+├── tests/                # Test suite for the project
+│   ├── test_data_prep.py # Unit tests for data preparation
+│   └── smoke_test.py     # End-to-end smoke test
+├── Dockerfile            # Defines the containerized environment
+├── README.md             # This file
+├── requirements.in       # Application dependencies
+└── dev-requirements.in   # Development dependencies
 ```
 
-## Setup
+## Getting Started
 
-### Prerequisites
+### 1. Setup
 
-- Azure CLI installed and configured
-- Azure subscription with appropriate permissions
-- Python 3.9+
-
-### 1. Configure Environment
-
-Copy the example configuration file:
+Clone the repository and install the required dependencies.
 
 ```bash
-cp config.env.example config.env
+# Clone the repository
+git clone <your-repo-url>
+cd <your-repo-name>
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-Edit `config.env` with your Azure subscription details.
+### 2. Run the Full Pipeline (Local)
 
-### 2. Set Up Azure ML Workspace
-
-Run the setup script to create workspace and compute resources:
+The following commands will run the entire pipeline using the sample data and default configurations.
 
 ```bash
-# Bash
-./setup.sh
+# 1. Prepare the data (uses configs/data.yaml)
+python src/data_prep.py
 
-# PowerShell
-.\setup.ps1
+# 2. Train the models (uses configs/train.yaml and mlflow.yaml)
+python src/train.py
+
+# 3. Evaluate the best model (e.g., Random Forest)
+python src/evaluate.py --model models/local/rf_model.pkl --data data/processed --output evaluation/rf
+
+# 4. Score new data
+python src/score.py --model models/local/rf_model.pkl --data-dir data/processed --input data/sample.csv --output predictions/sample_predictions.csv
 ```
 
-This will create:
-- Resource group
-- Azure ML workspace
-- Compute instance (for notebooks)
-- Compute cluster (for training)
+### 3. View Experiments with MLflow UI
 
-### 3. Upload Data
-
-Data has already been uploaded to Azure Blob Storage and registered as data assets:
-- `churn-data` - Full dataset (10,000 rows)
-- `churn-data-sample` - Sample dataset (1,000 rows)
-
-## Usage
-
-### Start/Stop Compute Instance
-
-To save costs, stop the compute instance when not in use:
+After running the training script, you can inspect the results using the MLflow UI.
 
 ```bash
-# Stop compute
-./stop_compute.sh
-
-# Start compute
-./start_compute.sh
-
-# Check status
-./compute_status.sh
+#low UI
+mlflow ui
 ```
 
-### Run EDA
+This will start a local server, typically at `http://127.0.0.1:5000`, where you can view your experiment runs, compare metrics, and see the logged artifacts.
 
-1. Start the compute instance
-2. Open Azure ML Studio: https://ml.azure.com
-3. Navigate to Notebooks
-4. Upload and run `notebooks/eda.ipynb`
+### 4. Build and Test with Docker
 
-## Project Plan
+To ensure a consistent and reproducible environment, you can build the Docker image and run the tests inside the container.
 
-This project follows the MLZoomcamp Project 1 plan:
+```bash
+# 1. Build the Docker image
+docker build -t bank-churn:latest .
 
-1. ✅ Set up project (repo + README)
-2. ✅ Prepare data (local + cloud)
-3. ✅ Exploratory Data Analysis
-4. ⬜ Move logic from notebook → scripts
-5. ⬜ Define the environment
-6. ⬜ Local testing before AML
-7. ⬜ Create AML components
-8. ⬜ Build Azure ML pipeline
-9. ⬜ Containerization
-10. ⬜ Deploy and test
-11. ⬜ Document everything
+# 2. Run the test suite inside the container
+docker run --rm -v "$PWD:/app" -w /app bank-churn:latest \
+  bash -lc "pytest -q && python tests/smoke_test.py"
+```
 
-## Cost Management
+### 5. Run Tests
 
-- **Compute Instance**: Charges when running. Stop when not in use.
-- **Compute Cluster**: Auto-scales to 0 nodes when idle (no charge).
-- **Workspace**: Free (only storage charges apply).
+To ensure everything is working correctly, run the test suite.
 
-## Configuration
+```bash
+# Run unit tests
+pytest
 
-All Azure resources are configured in `config.env`:
-- Subscription ID
-- Resource group
-- Workspace name
-- Compute resources
-- Data assets
+# Run the end-to-end smoke test
+python tests/smoke_test.py
 
-## Next Steps
+# Run the smoke test with HPO enabled
+SMOKE_HPO=1 SMOKE_HPO_MODEL=rf python tests/smoke_test.py
+```
 
-1. Complete EDA analysis
-2. Create training scripts in `src/`
-3. Set up conda environment
-4. Build Azure ML pipeline
-5. Deploy model as endpoint
+## Running the Pipeline on Azure ML
 
-## License
+To run the full training pipeline on Azure Machine Learning, ensure your `.env` file is correctly configured and that you have authenticated with Azure (`az login`). Then, execute the pipeline script:
 
-This project is part of the MLZoomcamp course.
+```bash
+python run_pipeline.py
+```
 
+This will submit a new pipeline job to your Azure ML workspace and print a link to view the run in the studio.
+
+## Documentation
+
+For more detailed information, please refer to the guides in the `docs/` directory:
+
+- **[Project Plan](docs/MLZoomcamp-Project1-ProjectPlan-v2.md)**: The development plan and history of the project.
+- **[Pipeline Guide](docs/pipeline_guide.md)**: Detailed explanation of each script in the ML pipeline.
+- **[Setup Guide](docs/setup_guide.md)**: Instructions for local and Azure ML setup.
+- **[SMOTE Comparison](docs/smote_comparison.md)**: Analysis of using SMOTE for class imbalance.
+- **[Dependencies Guide](docs/dependencies.md)**: Information on managing Python dependencies.

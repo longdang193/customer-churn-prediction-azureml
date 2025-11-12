@@ -1,248 +1,227 @@
 #!/usr/bin/env python3
-"""Data Preparation Script for Bank Customer Churn Prediction."""
+"""Data preparation CLI for the churn dataset."""
+
+from __future__ import annotations
 
 import argparse
-import os
+import json
 import pickle
 import sys
 from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_config_value
+from config_loader import get_config_value, load_config
+
+DEFAULT_CONFIG = Path(__file__).parents[1] / "configs" / "data.yaml"
+DEFAULT_COLUMNS_TO_REMOVE = ("RowNumber", "CustomerId", "Surname")
+DEFAULT_CATEGORICAL = ("Geography", "Gender")
 
 
-def load_data(input_path: str) -> pd.DataFrame:
-    """Load data from CSV file."""
-    print(f"Loading data from: {input_path}")
-    df = pd.read_csv(input_path)
+def parse_bool(value: Any, *, default: bool) -> bool:
+    """Parse loose truthy/falsey values without relying on distutils."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+
+    raise ValueError(f"Cannot interpret value '{value}' as boolean.")
+
+def load_data(path: Path) -> pd.DataFrame:
+    """Read the raw CSV and report basic shape."""
+    print(f"Loading data from: {path}")
+    df = pd.read_csv(path)
     print(f"  Loaded {len(df)} rows, {len(df.columns)} columns")
     return df
 
 
-def remove_uninformative_columns(df: pd.DataFrame, cols_to_remove: list = None) -> pd.DataFrame:
-    """Remove ID and high cardinality columns that don't help prediction."""
-    if cols_to_remove is None:
-        cols_to_remove = ['RowNumber', 'CustomerId', 'Surname']
-    
-    existing_cols = [col for col in cols_to_remove if col in df.columns]
-    
-    if existing_cols:
-        df = df.drop(columns=existing_cols)
-        print(f"Removed columns: {', '.join(existing_cols)}")
-    
-    return df
+def remove_columns(df: pd.DataFrame, columns: Iterable[str]) -> Tuple[pd.DataFrame, List[str]]:
+    """Drop any columns present in the frame and return the removed columns."""
+    to_drop = [col for col in columns if col in df.columns]
+    if to_drop:
+        df = df.drop(columns=to_drop)
+        print(f"Removed columns: {', '.join(to_drop)}")
+    return df, to_drop
 
 
-def encode_categorical_features(
+def encode_categoricals(
     df: pd.DataFrame,
-    encoders: dict = None,
-    fit: bool = True,
-    categorical_cols: list = None
-) -> tuple[pd.DataFrame, dict]:
-    """Encode categorical variables using Label Encoding."""
-    if categorical_cols is None:
-        categorical_cols = ['Geography', 'Gender']
-    if encoders is None:
-        encoders = {}
-    
+    *,
+    categorical_cols: Iterable[str],
+    encoders: Optional[Dict[str, LabelEncoder]] = None,
+) -> Tuple[pd.DataFrame, Dict[str, LabelEncoder]]:
+    """Label-encode categorical columns, reusing encoders when provided."""
+    encoders = encoders or {}
     df_encoded = df.copy()
     for col in categorical_cols:
-        if col in df.columns:
-            if fit:
-                encoders[col] = LabelEncoder()
-                df_encoded[col] = encoders[col].fit_transform(df[col])
-            else:
-                if col not in encoders:
-                    raise ValueError(f"No encoder for column: {col}")
-                df_encoded[col] = encoders[col].transform(df[col])
-    
+        if col not in df.columns:
+            continue
+        if col not in encoders:
+            encoders[col] = LabelEncoder().fit(df[col])
+        df_encoded[col] = encoders[col].transform(df[col])
     return df_encoded, encoders
 
 
-def scale_numerical_features(
+def scale_features(
     df: pd.DataFrame,
-    target_col: str = 'Exited',
-    scaler: StandardScaler = None,
-    fit: bool = True
-) -> tuple[pd.DataFrame, StandardScaler]:
-    """Scale numerical features using StandardScaler."""
-    numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    if target_col in numerical_cols:
-        numerical_cols.remove(target_col)
-    
+    *,
+    scaler: Optional[StandardScaler] = None,
+    columns: Optional[Iterable[str]] = None,
+    exclude_cols: Optional[Iterable[str]] = None,
+) -> Tuple[pd.DataFrame, StandardScaler, List[str]]:
+    """Standard-score the numeric columns."""
     df_scaled = df.copy()
-    if fit:
-        scaler = StandardScaler()
-        df_scaled[numerical_cols] = scaler.fit_transform(df[numerical_cols])
+    if columns is not None:
+        numeric_cols = [col for col in columns if col in df.columns]
     else:
-        if scaler is None:
-            raise ValueError("Scaler required when fit=False")
-        df_scaled[numerical_cols] = scaler.transform(df[numerical_cols])
-    
-    return df_scaled, scaler
+        numeric_cols = df.select_dtypes(include=["int64", "float64", "int32", "float32"]).columns.tolist()
+        if exclude_cols:
+            exclude_set = {col for col in exclude_cols if col in df.columns}
+            numeric_cols = [col for col in numeric_cols if col not in exclude_set]
+
+    if not numeric_cols:
+        scaler = scaler or StandardScaler()
+        return df_scaled, scaler, []
+
+    if scaler is None:
+        scaler = StandardScaler()
+        df_scaled[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+    else:
+        df_scaled[numeric_cols] = scaler.transform(df[numeric_cols])
+
+    return df_scaled, scaler, list(numeric_cols)
+
+
+def save_artifacts(
+    output_dir: Path, *,
+    encoders: Dict[str, LabelEncoder], 
+    scaler: StandardScaler, 
+    metadata: Dict[str, Any]
+) -> None:
+    """Save all preprocessing artifacts to disk."""
+    with open(output_dir / "encoders.pkl", "wb") as fh:
+        pickle.dump(encoders, fh)
+    with open(output_dir / "scaler.pkl", "wb") as fh:
+        pickle.dump(scaler, fh)
+    with open(output_dir / "metadata.json", "w") as fh:
+        json.dump(metadata, fh, indent=2)
 
 
 def prepare_data(
-    input_path: str,
-    output_dir: str,
-    test_size: float = 0.2,
-    random_state: int = 42,
-    target_col: str = 'Exited',
-    cols_to_remove: list = None,
-    categorical_cols: list = None,
-    stratify: bool = True
+    *,
+    input_path: Path,
+    output_dir: Path,
+    test_size: float,
+    random_state: int,
+    target_col: str,
+    columns_to_remove: Iterable[str],
+    categorical_cols: Iterable[str],
+    stratify: bool,
 ) -> None:
-    """Complete data preparation pipeline."""
-    print(f"{'='*70}\nDATA PREPARATION PIPELINE\n{'='*70}")
-    
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    
+    """Execute the end-to-end preprocessing pipeline."""
+    print(f"{'=' * 70}\nDATA PREPARATION PIPELINE\n{'=' * 70}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     df = load_data(input_path)
-    df = remove_uninformative_columns(df, cols_to_remove)
-    
+    df, columns_removed = remove_columns(df, columns_to_remove)
+
     if target_col not in df.columns:
-        raise ValueError(f"Target column '{target_col}' not found")
-    
+        raise ValueError(f"Target column '{target_col}' not present in data.")
+
     X = df.drop(columns=[target_col])
     y = df[target_col]
-    
-    stratify_param = y if stratify else None
+
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=stratify_param
+        X, y, test_size=test_size, random_state=random_state, stratify=y if stratify else None
     )
-    print(f"Split: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
-    
-    X_train, encoders = encode_categorical_features(X_train, fit=True, categorical_cols=categorical_cols)
-    X_test, _ = encode_categorical_features(X_test, encoders=encoders, fit=False, categorical_cols=categorical_cols)
-    
-    X_train, scaler = scale_numerical_features(X_train, fit=True)
-    X_test, _ = scale_numerical_features(X_test, scaler=scaler, fit=False)
-    
-    X_train.to_csv(output_path / 'X_train.csv', index=False)
-    X_test.to_csv(output_path / 'X_test.csv', index=False)
-    y_train.to_csv(output_path / 'y_train.csv', index=False, header=True)
-    y_test.to_csv(output_path / 'y_test.csv', index=False, header=True)
-    
-    with open(output_path / 'encoders.pkl', 'wb') as f:
-        pickle.dump(encoders, f)
-    with open(output_path / 'scaler.pkl', 'wb') as f:
-        pickle.dump(scaler, f)
-    
+    print(f"Split: {len(X_train)} train / {len(X_test)} test samples")
+
+    X_train_encoded, encoders = encode_categoricals(X_train, categorical_cols=categorical_cols)
+    X_test_encoded, _ = encode_categoricals(X_test, categorical_cols=categorical_cols, encoders=encoders)
+
+    encoded_categorical_cols = [col for col in categorical_cols if col in X_train_encoded.columns]
+
+    X_train_scaled, scaler, scaled_numeric_cols = scale_features(
+        X_train_encoded,
+        exclude_cols=encoded_categorical_cols,
+    )
+    X_test_scaled, _, _ = scale_features(
+        X_test_encoded,
+        scaler=scaler,
+        columns=scaled_numeric_cols,
+    )
+
+    X_train_scaled.to_csv(output_dir / "X_train.csv", index=False)
+    X_test_scaled.to_csv(output_dir / "X_test.csv", index=False)
+    y_train.to_csv(output_dir / "y_train.csv", index=False, header=True)
+    y_test.to_csv(output_dir / "y_test.csv", index=False, header=True)
+
     metadata = {
-        'feature_names': list(X_train.columns),
-        'target_name': target_col,
-        'n_features': len(X_train.columns),
-        'n_train': len(X_train),
-        'n_test': len(X_test),
-        'test_size': test_size,
-        'random_state': random_state
+        "feature_names": list(X_train_scaled.columns),
+        "target_name": target_col,
+        "n_train": len(X_train_scaled),
+        "n_test": len(X_test_scaled),
+        "categorical_encoded_columns": encoded_categorical_cols,
+        "scaled_numeric_columns": list(scaled_numeric_cols),
+        "dropped_columns": columns_removed,
     }
-    
-    import json
-    with open(output_path / 'metadata.json', 'w') as f:
-        json.dump(metadata, f, indent=2)
-    
-    print(f"\n{'='*70}\n✓ DATA PREPARATION COMPLETE\n{'='*70}")
-    print(f"Features: {len(X_train.columns)} | Train: {len(X_train)} | Test: {len(X_test)}")
-    print(f"Churn rate: {y_train.mean():.2%} (train), {y_test.mean():.2%} (test)")
+    save_artifacts(output_dir, encoders=encoders, scaler=scaler, metadata=metadata)
+
+    print(
+        f"\n{'=' * 70}\n✓ DATA PREPARATION COMPLETE\n{'=' * 70}\n"
+        f"Features: {len(X_train_scaled.columns)} | Train: {len(X_train_scaled)} | Test: {len(X_test_scaled)}\n"
+        f"Churn rate: {y_train.mean():.2%} (train) / {y_test.mean():.2%} (test)"
+    )
 
 
-def main():
-    """Main function with CLI argument parsing."""
-    parser = argparse.ArgumentParser(
-        description='Prepare bank churn data for training',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
-    parser.add_argument(
-        '--input',
-        type=str,
-        default=None,
-        help='Path to input CSV file'
-    )
-    
-    parser.add_argument(
-        '--output',
-        type=str,
-        default=None,
-        help='Directory to save processed data'
-    )
-    
-    parser.add_argument(
-        '--config',
-        type=str,
-        default=None,
-        help='Path to configuration file (default: configs/data.yaml)'
-    )
-    
-    parser.add_argument(
-        '--test-size',
-        type=float,
-        default=None,
-        help='Proportion of data for test set (overrides config)'
-    )
-    
-    parser.add_argument(
-        '--random-state',
-        type=int,
-        default=None,
-        help='Random seed for reproducibility (overrides config)'
-    )
-    
-    parser.add_argument(
-        '--target',
-        type=str,
-        default=None,
-        help='Name of target column (overrides config)'
-    )
-    
+def get_config(args: argparse.Namespace) -> Dict[str, Any]:
+    """Load config from file and merge with CLI arguments."""
+    config_path = Path(args.config or DEFAULT_CONFIG)
+    config = load_config(str(config_path)) if config_path.exists() else {}
+    cfg = get_config_value(config, "data", {}) or {}
+
+    stratify_raw = get_config_value(cfg, "stratify", True)
+    stratify = parse_bool(stratify_raw, default=True)
+
+    return {
+        "input_path": Path(args.input or get_config_value(cfg, "input_path", "data/churn.csv")),
+        "output_dir": Path(args.output or get_config_value(cfg, "output_dir", "data/processed")),
+        "test_size": float(args.test_size or get_config_value(cfg, "test_size", 0.2)),
+        "random_state": int(args.random_state or get_config_value(cfg, "random_state", 42)),
+        "target_col": args.target or get_config_value(cfg, "target_column", "Exited"),
+        "columns_to_remove": get_config_value(cfg, "columns_to_remove", DEFAULT_COLUMNS_TO_REMOVE),
+        "categorical_cols": get_config_value(cfg, "categorical_columns", DEFAULT_CATEGORICAL),
+        "stratify": stratify,
+    }
+
+
+def main() -> None:
+    """CLI entry-point."""
+    parser = argparse.ArgumentParser(description="Prepare churn data for training.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--input", type=str, help="Input CSV file")
+    parser.add_argument("--output", type=str, help="Output directory")
+    parser.add_argument("--config", type=str, help=f"Config file (default: {DEFAULT_CONFIG})")
+    parser.add_argument("--test-size", type=float, help="Override test split proportion")
+    parser.add_argument("--random-state", type=int, help="Override random seed")
+    parser.add_argument("--target", type=str, help="Override target column name")
     args = parser.parse_args()
-    
-    # Determine config path (relative to project root)
-    if args.config is None:
-        project_root = Path(__file__).parent.parent
-        config_path = project_root / 'configs' / 'data.yaml'
-    else:
-        config_path = Path(args.config)
-    
-    # Load configuration from YAML
-    config = {}
-    if config_path.exists():
-        config = load_config(str(config_path))
-        print(f"Loaded configuration from: {config_path}")
-    else:
-        print(f"Config file not found: {config_path}, using defaults")
-    
-    # Get values from config or CLI args (CLI takes precedence)
-    data_config = get_config_value(config, 'data', {})
-    
-    input_path = args.input or get_config_value(data_config, 'input_path', 'data/churn.csv')
-    output_dir = args.output or get_config_value(data_config, 'output_dir', 'data/processed')
-    test_size = args.test_size or get_config_value(data_config, 'test_size', 0.2)
-    random_state = args.random_state or get_config_value(data_config, 'random_state', 42)
-    target_col = args.target or get_config_value(data_config, 'target_column', 'Exited')
-    cols_to_remove = get_config_value(data_config, 'columns_to_remove', ['RowNumber', 'CustomerId', 'Surname'])
-    categorical_cols = get_config_value(data_config, 'categorical_columns', ['Geography', 'Gender'])
-    stratify = get_config_value(data_config, 'stratify', True)
-    
-    # Run data preparation
-    prepare_data(
-        input_path=input_path,
-        output_dir=output_dir,
-        test_size=test_size,
-        random_state=random_state,
-        target_col=target_col,
-        cols_to_remove=cols_to_remove,
-        categorical_cols=categorical_cols,
-        stratify=stratify
-    )
+
+    config = get_config(args)
+    prepare_data(**config)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

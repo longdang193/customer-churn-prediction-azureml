@@ -1,0 +1,23 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: data_prep
+version: 1
+type: command
+
+inputs:
+  raw_data: 
+    type: uri_file
+
+outputs:
+  processed_data:
+    type: uri_folder
+
+code: ../../src
+
+environment: azureml:bank-churn-env:1
+compute: azureml:cpu-cluster
+
+command: >-
+  python data_prep.py 
+  --input ${{inputs.raw_data}} 
+  --output ${{outputs.processed_data}}
+

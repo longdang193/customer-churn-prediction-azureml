@@ -1,0 +1,18 @@
+# Core runtime dependencies (kept light)
+pandas
+numpy
+scikit-learn
+imbalanced-learn
+pyyaml
+matplotlib
+seaborn
+scipy
+
+# Optional additions (enabled per request)
+xgboost           # enable XGBoost model
+mlflow            # experiment tracking
+azure-ai-ml       # Azure ML SDK
+azure-identity    # Azure identity for SDK
+fastapi           # serving API
+
+

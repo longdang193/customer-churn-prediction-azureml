@@ -1,289 +1,221 @@
 #!/usr/bin/env python3
-"""Model Scoring Script for Bank Customer Churn Prediction."""
+"""Scoring utilities for the churn prediction pipeline."""
+
+from __future__ import annotations
 
 import argparse
 import json
 import pickle
+import sys
 from pathlib import Path
-from typing import Dict, Any, Union
+from typing import Any, Dict, Iterable, List, Union
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).parent))
+from config_loader import get_config_value, load_config
+
+DEFAULT_CONFIG = Path(__file__).parents[1] / "configs" / "score.yaml"
 
 
-def load_model(model_path: str) -> Any:
-    """Load trained model from pickle file."""
-    with open(model_path, 'rb') as f:
-        model = pickle.load(f)
-    return model
+def load_artifacts(model_path: Path, data_dir: Path) -> Dict[str, Any]:
+    """Load the model and preprocessing artifacts."""
+    with open(model_path, "rb") as fh:
+        model = pickle.load(fh)
+    with open(data_dir / "encoders.pkl", "rb") as fh:
+        encoders = pickle.load(fh)
+    with open(data_dir / "scaler.pkl", "rb") as fh:
+        scaler = pickle.load(fh)
+    with open(data_dir / "metadata.json", "r") as fh:
+        metadata = json.load(fh)
+    return {"model": model, "encoders": encoders, "scaler": scaler, "metadata": metadata}
 
 
-def load_preprocessing_artifacts(data_dir: str) -> Dict[str, Any]:
-    """Load encoders, scaler, and metadata."""
-    data_path = Path(data_dir)
-    
-    with open(data_path / 'encoders.pkl', 'rb') as f:
-        encoders = pickle.load(f)
-    
-    with open(data_path / 'scaler.pkl', 'rb') as f:
-        scaler = pickle.load(f)
-    
-    with open(data_path / 'metadata.json', 'r') as f:
-        metadata = json.load(f)
-    
-    return {
-        'encoders': encoders,
-        'scaler': scaler,
-        'metadata': metadata
-    }
-
-
-def preprocess_input(
+def preprocess(
     df: pd.DataFrame,
-    artifacts: Dict[str, Any],
-    remove_uninformative: bool = True
+    *,
+    encoders: Dict[str, Any],
+    scaler: Any,
+    feature_names: List[str],
+    metadata: Dict[str, Any],
+    drop_uninformative: bool = True,
 ) -> pd.DataFrame:
-    """
-    Preprocess input data using saved artifacts.
-    
-    Args:
-        df: Input DataFrame
-        artifacts: Dictionary with encoders, scaler, metadata
-        remove_uninformative: Whether to remove ID columns
-        
-    Returns:
-        Preprocessed DataFrame ready for prediction
-    """
-    df_processed = df.copy()
-    
-    if remove_uninformative:
-        cols_to_remove = ['RowNumber', 'CustomerId', 'Surname']
-        existing_cols = [col for col in cols_to_remove if col in df_processed.columns]
-        if existing_cols:
-            df_processed = df_processed.drop(columns=existing_cols)
-    
-    encoders = artifacts['encoders']
-    scaler = artifacts['scaler']
-    feature_names = artifacts['metadata']['feature_names']
-    
-    # Encode categorical features
+    """Apply the full preprocessing pipeline to raw data."""
+    processed = df.copy()
+    if drop_uninformative:
+        if "dropped_columns" not in metadata:
+            raise KeyError("Preprocessing metadata is missing 'dropped_columns'.")
+        dropped_cols = metadata["dropped_columns"]
+        if not isinstance(dropped_cols, Iterable):
+            raise TypeError("'dropped_columns' metadata must be an iterable of column names.")
+        processed = processed.drop(columns=[c for c in dropped_cols if c in processed.columns], errors='ignore')
+    if "Exited" in processed.columns:
+        processed = processed.drop(columns=["Exited"])
+
     for col, encoder in encoders.items():
-        if col in df_processed.columns:
-            df_processed[col] = encoder.transform(df_processed[col])
+        if col not in processed.columns:
+            continue
+
+        column = processed[col]
+        # Only attempt guard if original values are non-numeric strings
+        if column.dtype.kind in {"O", "U"}:
+            series = column.astype(str)
+            known_classes = set(encoder.classes_)
+            unknown_mask = ~series.isin(known_classes)
+
+            if unknown_mask.any():
+                unknown_label = "__unknown__"
+                if unknown_label not in known_classes:
+                    encoder.classes_ = np.sort(np.append(encoder.classes_, unknown_label))
+                    known_classes.add(unknown_label)
+                series.loc[unknown_mask] = unknown_label
+
+            processed[col] = encoder.transform(series)
+        else:
+            processed[col] = encoder.transform(column)
     
-    # Scale numerical features
-    numerical_cols = df_processed.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    
-    # Remove target if present
-    if 'Exited' in numerical_cols:
-        numerical_cols.remove('Exited')
-    
-    if numerical_cols:
-        df_processed[numerical_cols] = scaler.transform(df_processed[numerical_cols])
-    
-    # Ensure correct feature order
-    df_processed = df_processed[feature_names]
-    
-    return df_processed
+    missing = [col for col in feature_names if col not in processed.columns]
+    if missing:
+        raise ValueError(f"Input data missing required columns: {missing}")
+
+    processed = processed[feature_names].copy()
+    scaled_cols = [col for col in metadata.get("scaled_numeric_columns", []) if col in processed.columns]
+    if scaled_cols:
+        subset = processed.loc[:, scaled_cols].astype(float)
+        processed.loc[:, scaled_cols] = scaler.transform(subset)
+    return processed
 
 
-def predict(model: Any, X: pd.DataFrame) -> np.ndarray:
-    """Make predictions using the model."""
-    return model.predict(X)
+def predict_probabilities(model: Any, X: pd.DataFrame) -> np.ndarray:
+    """Return churn probabilities, falling back to decision function when needed."""
+    if hasattr(model, "predict_proba"):
+        proba = model.predict_proba(X)
+        proba = np.asarray(proba, dtype=float)
+        if proba.ndim == 1:
+            return proba
+        if proba.shape[1] >= 2:
+            return proba[:, 1]
+        return proba.ravel()
+
+    if hasattr(model, "decision_function"):
+        decision = model.decision_function(X)
+        decision = np.asarray(decision, dtype=float)
+        if decision.ndim > 1:
+            decision = decision[:, 0]
+        min_val = np.min(decision)
+        max_val = np.max(decision)
+        if np.isclose(max_val, min_val):
+            return np.full(decision.shape, 0.5, dtype=float)
+        return (decision - min_val) / (max_val - min_val)
+
+    return np.full(shape=(len(X),), fill_value=0.5, dtype=float)
 
 
-def predict_proba(model: Any, X: pd.DataFrame) -> np.ndarray:
-    """Get prediction probabilities."""
-    return model.predict_proba(X)
+def ensure_path(path: Union[str, Path]) -> Path:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = Path.cwd() / resolved
+    return resolved
 
 
 def score_batch(
-    model_path: str,
-    data_dir: str,
-    input_path: str,
-    output_path: str,
-    include_proba: bool = True,
-    threshold: float = 0.5
+    model: Any, 
+    df_input: pd.DataFrame, 
+    artifacts: Dict[str, Any], 
+    output_path: Path, 
+    include_proba: bool
 ) -> None:
-    """
-    Score a batch of examples from CSV file.
-    
-    Args:
-        model_path: Path to trained model
-        data_dir: Directory with preprocessing artifacts
-        input_path: Path to input CSV file
-        output_path: Path to save predictions CSV
-        include_proba: Whether to include probability scores
-        threshold: Classification threshold (default: 0.5)
-    """
-    print(f"{'='*70}\nBATCH SCORING\n{'='*70}")
-    
-    print(f"\n[1/4] Loading model and artifacts...")
-    model = load_model(model_path)
-    artifacts = load_preprocessing_artifacts(data_dir)
-    print(f"  Model: {type(model).__name__}")
-    print(f"  Features: {len(artifacts['metadata']['feature_names'])}")
-    
-    print(f"\n[2/4] Loading input data...")
-    df_input = pd.read_csv(input_path)
-    print(f"  Input samples: {len(df_input)}")
-    
-    print(f"\n[3/4] Preprocessing and predicting...")
-    X_processed = preprocess_input(df_input, artifacts)
-    predictions = predict(model, X_processed)
-    probabilities = predict_proba(model, X_processed)[:, 1]
-    
-    print(f"\n[4/4] Saving predictions...")
+    """Score a batch of data and save the results."""
+    X = preprocess(df_input, **artifacts, drop_uninformative=True)
+    predictions = model.predict(X)
+    probabilities = predict_probabilities(model, X) if include_proba else None
+
     df_output = df_input.copy()
-    df_output['predicted_churn'] = predictions
-    df_output['churn_probability'] = probabilities
-    
-    if 'Exited' in df_output.columns:
-        df_output['correct'] = (df_output['Exited'] == df_output['predicted_churn']).astype(int)
-    
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    df_output["predicted_churn"] = predictions
+    if include_proba and probabilities is not None:
+        df_output["churn_probability"] = probabilities
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     df_output.to_csv(output_path, index=False)
-    print(f"  ✓ Saved: {output_path}")
-    
-    print(f"\n{'='*70}\n✓ SCORING COMPLETE\n{'='*70}")
-    print(f"Predictions: {predictions.sum()} churn, {len(predictions) - predictions.sum()} retain")
-    print(f"Avg probability: {probabilities.mean():.3f}")
-    
-    if 'Exited' in df_output.columns:
-        accuracy = df_output['correct'].mean()
-        print(f"Accuracy (if labels available): {accuracy:.3f}")
+    print(f"  ✓ Saved predictions to: {output_path}")
 
 
 def score_single(
-    model_path: str,
-    data_dir: str,
-    input_data: Dict[str, Any],
-    threshold: float = 0.5
+    model: Any,
+    payload: Dict[str, Any],
+    artifacts: Dict[str, Any],
+    *,
+    include_proba: bool,
 ) -> Dict[str, Any]:
-    """
-    Score a single example (for API deployment).
-    
-    Args:
-        model_path: Path to trained model
-        data_dir: Directory with preprocessing artifacts
-        input_data: Dictionary with feature values
-        threshold: Classification threshold
-        
-    Returns:
-        Dictionary with prediction and probability
-    """
-    model = load_model(model_path)
-    artifacts = load_preprocessing_artifacts(data_dir)
-    
-    df_input = pd.DataFrame([input_data])
-    X_processed = preprocess_input(df_input, artifacts)
-    
-    prediction = predict(model, X_processed)[0]
-    probability = predict_proba(model, X_processed)[0, 1]
-    
-    return {
-        'prediction': int(prediction),
-        'churn_probability': float(probability),
-        'predicted_class': 'churn' if prediction == 1 else 'retain'
+    """Score a single data point."""
+    df_input = pd.DataFrame([payload])
+    X = preprocess(df_input, **artifacts, drop_uninformative=True)
+    prediction = model.predict(X)[0]
+    probability = predict_probabilities(model, X)[0] if include_proba else None
+    result = {
+        "prediction": int(prediction),
+        "predicted_class": "churn" if prediction == 1 else "retain",
+    }
+    if include_proba and probability is not None:
+        result["churn_probability"] = float(probability)
+    return result
+
+
+def main() -> None:
+    """CLI entry-point for scoring."""
+    parser = argparse.ArgumentParser(description="Score churn models.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--model", type=str, required=True, help="Path to trained model (.pkl)")
+    parser.add_argument("--data-dir", type=str, required=True, help="Directory with preprocessing artifacts")
+    parser.add_argument("--input", type=str, required=True, help="Input CSV or JSON file")
+    parser.add_argument("--output", type=str, required=True, help="Output path for scored data")
+    parser.add_argument("--config", type=str, default=None, help=f"Config file (default: {DEFAULT_CONFIG})")
+    parser.add_argument("--json", action="store_true", help="Treat input/output as JSON")
+    args = parser.parse_args()
+
+    config_path = Path(args.config or DEFAULT_CONFIG)
+    config = load_config(str(config_path)) if config_path.exists() else {}
+    score_config = get_config_value(config, 'scoring', {})
+    include_probability = bool(get_config_value(score_config, 'include_probability', True))
+
+    model_path = ensure_path(args.model)
+    data_dir = ensure_path(args.data_dir)
+    input_path = ensure_path(args.input)
+    output_path = ensure_path(args.output)
+
+    artifacts = load_artifacts(model_path, data_dir)
+    model = artifacts.pop("model")
+    # Re-structure artifacts for preprocess function
+    metadata = artifacts["metadata"]
+    preprocess_artifacts = {
+        "encoders": artifacts["encoders"],
+        "scaler": artifacts["scaler"],
+        "feature_names": metadata["feature_names"],
+        "metadata": metadata,
     }
 
-
-def score_from_json(
-    model_path: str,
-    data_dir: str,
-    input_path: str,
-    output_path: str
-) -> None:
-    """Score from JSON input (for API-like usage)."""
-    print(f"{'='*70}\nJSON SCORING\n{'='*70}")
-    
-    with open(input_path, 'r') as f:
-        input_data = json.load(f)
-    
-    if isinstance(input_data, list):
-        results = []
-        for item in input_data:
-            result = score_single(model_path, data_dir, item)
-            results.append(result)
-    else:
-        results = score_single(model_path, data_dir, input_data)
-    
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    print(f"\n✓ Saved predictions to: {output_path}")
-
-
-def main():
-    """Main function with CLI."""
-    parser = argparse.ArgumentParser(
-        description='Score bank churn prediction model',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
-    parser.add_argument(
-        '--model',
-        type=str,
-        required=True,
-        help='Path to trained model (.pkl file)'
-    )
-    
-    parser.add_argument(
-        '--data-dir',
-        type=str,
-        required=True,
-        help='Directory with preprocessing artifacts (encoders, scaler, metadata)'
-    )
-    
-    parser.add_argument(
-        '--input',
-        type=str,
-        required=True,
-        help='Input CSV or JSON file'
-    )
-    
-    parser.add_argument(
-        '--output',
-        type=str,
-        required=True,
-        help='Output CSV or JSON file for predictions'
-    )
-    
-    parser.add_argument(
-        '--threshold',
-        type=float,
-        default=0.5,
-        help='Classification threshold'
-    )
-    
-    parser.add_argument(
-        '--no-proba',
-        action='store_true',
-        help='Do not include probability scores in output'
-    )
-    
-    parser.add_argument(
-        '--json',
-        action='store_true',
-        help='Use JSON format for input/output'
-    )
-    
-    args = parser.parse_args()
-    
     if args.json:
-        score_from_json(args.model, args.data_dir, args.input, args.output)
+        with open(input_path, "r") as fh:
+            payload = json.load(fh)
+        if isinstance(payload, list):
+            results = [
+                score_single(model, item, preprocess_artifacts, include_proba=include_probability)
+                for item in payload
+            ]
+        else:
+            results = score_single(model, payload, preprocess_artifacts, include_proba=include_probability)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w") as fh:
+            json.dump(results, fh, indent=2)
+        print(f"\n✓ Saved JSON predictions to: {output_path}")
     else:
         score_batch(
-            model_path=args.model,
-            data_dir=args.data_dir,
-            input_path=args.input,
-            output_path=args.output,
-            include_proba=not args.no_proba,
-            threshold=args.threshold
+            model=model,
+            df_input=pd.read_csv(input_path),
+            artifacts=preprocess_artifacts,
+            output_path=output_path,
+            include_proba=include_probability,
         )
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

@@ -1,0 +1,41 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: train_model
+version: 1
+type: command
+
+inputs:
+  processed_data:
+    type: uri_folder
+  rf_max_depth:
+    type: integer
+    optional: true
+  rf_n_estimators:
+    type: integer
+    optional: true
+  rf_min_samples_split:
+    type: integer
+    optional: true
+  rf_min_samples_leaf:
+    type: integer
+    optional: true
+
+outputs:
+  model_output:
+    type: uri_folder
+  parent_run_id:
+    type: uri_file
+
+code: ../../src
+
+environment: azureml:bank-churn-env:1
+
+command: >-
+  python train.py
+  --data ${{inputs.processed_data}}
+  --model-artifact-dir ${{outputs.model_output}}
+  --parent-run-id-output ${{outputs.parent_run_id}}
+  $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
+  $[[--set rf.n_estimators=${{inputs.rf_n_estimators}}]]
+  $[[--set rf.min_samples_split=${{inputs.rf_min_samples_split}}]]
+  $[[--set rf.min_samples_leaf=${{inputs.rf_min_samples_leaf}}]]
+

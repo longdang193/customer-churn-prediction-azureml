@@ -4,8 +4,8 @@
 training:
   # Models to train
   models:
-    - "logreg"
-    - "rf"
+    - "logreg"   # logistic regression (baseline)
+    - "rf"       # random forest
     # - "xgboost"  # Uncomment if XGBoost is installed
   
   # Class imbalance handling
@@ -20,33 +20,61 @@ training:
   # Hyperparameters
   hyperparameters:
     logreg:
-      C: 1.0
-      max_iter: 1000
-      solver: "lbfgs"
+      C: 1.0              # inverse regularization (higher = less regularization)
+      max_iter: 1000      # iteration cap for convergence
+      solver: "lbfgs"     # preferred solver for L2 penalty
     
     rf:
-      n_estimators: 100
-      max_depth: 10
-      min_samples_split: 10
-      min_samples_leaf: 4
-      max_features: "sqrt"
+      n_estimators: 100    # number of trees
+      max_depth: 10        # limit tree depth (None = unlimited)
+      min_samples_split: 10  # min samples to split internal node
+      min_samples_leaf: 4   # min samples at leaf node
+      max_features: "sqrt"  # features considered per split
     
     xgboost:
-      n_estimators: 100
-      max_depth: 6
-      learning_rate: 0.1
-      subsample: 0.8
-      colsample_bytree: 0.8
-
-# MLflow configuration
-mlflow:
-  enabled: false
-  experiment_name: "churn-prediction"
-  tracking_uri: null  # Set to Azure ML tracking URI if using Azure ML
+      n_estimators: 100      # boosting rounds
+      max_depth: 6           # depth of each tree
+      learning_rate: 0.1     # shrinkage step
+      subsample: 0.8         # row sampling ratio
+      colsample_bytree: 0.8  # column sampling ratio
 
 # Output configuration
 output:
   model_dir: "models/local"
   save_metrics: true
   save_comparison: true
+
+# Hyperparameter Optimization (HPO)
+hpo:
+  # Primary optimization metric and direction
+  metric: "f1"           # e.g., f1, roc_auc, recall, precision, accuracy
+  mode: "max"            # "max" or "min"
+  # Budget
+  budget:
+    max_trials: 10          # cap on random search trials
+    max_time_minutes: 15    # optional time limit (not enforced yet)
+  # Early stopping configuration (if your HPO runner supports it)
+  early_stopping:
+    enabled: true
+    patience: 3             # stop if metric does not improve
+    metric: "f1"            # metric to monitor
+    mode: "max"             # seek higher values
+  # Example search spaces (names match model keys)
+  search_space:
+    logreg:
+      C: [0.1, 1.0, 10.0]          # regularization strength candidates
+      solver: ["lbfgs"]            # solver options
+      max_iter: [1000]             # cap iterations
+    rf:
+      n_estimators: [100, 200]     # tree count
+      max_depth: [6, 10, null]     # depth limits
+      min_samples_split: [2, 5]    # split thresholds
+      min_samples_leaf: [1, 2]     # leaf thresholds
+      max_features: ["sqrt"]       # feature sampling
+    xgboost:
+      n_estimators: [100, 200]     # boosting rounds
+      max_depth: [3, 6]            # tree depth
+      learning_rate: [0.05, 0.1]   # shrinkage
+      subsample: [0.8, 1.0]        # row subsample
+      colsample_bytree: [0.8, 1.0] # column subsample
 

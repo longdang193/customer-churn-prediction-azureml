@@ -11,12 +11,17 @@ __pycache__/
 *.pyd
 .Python
 
-# Data files
-*.csv
-!data/sample.csv
+# Data & Output Files
+data/churn.csv
+data/processed*
+data/test_scoring.csv
 
-# Model artifacts
+# Model & Evaluation Artifacts
 models/
+evaluation/
+predictions/
+
+# Generic artifact types
 *.pkl
 *.joblib
 *.h5
@@ -46,3 +51,6 @@ build/
 dist/
 *.egg-info/
 
+
+# MLflow tracking data
+mlruns/

@@ -1,0 +1,6 @@
+# MLflow Configuration
+
+mlflow:
+  experiment_name: "churn-prediction"
+  tracking_uri: null  # Set to a remote server URI if needed (e.g., http://localhost:5000 or Azure ML URI)
+
