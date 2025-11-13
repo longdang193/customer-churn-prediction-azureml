@@ -11,6 +11,7 @@ scipy
 # Optional additions (enabled per request)
 xgboost           # enable XGBoost model
 mlflow            # experiment tracking
+azureml-mlflow    # Azure ML MLflow integration
 azure-ai-ml       # Azure ML SDK
 azure-identity    # Azure identity for SDK
 fastapi           # serving API

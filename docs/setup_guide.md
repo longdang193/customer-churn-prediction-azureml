@@ -46,6 +46,25 @@ AZURE_RESOURCE_GROUP="rg-churn-ml-project"
 AZURE_WORKSPACE_NAME="churn-ml-workspace"
 AZURE_STORAGE_ACCOUNT="yourstorageaccount"
 AZURE_STORAGE_CONTAINER="data"
+AZURE_RAW_DATA_ASSET="churn-data"
+AZURE_RAW_DATA_VERSION="1"
+```
+
+The template also includes optional entries you can customize:
+- `AZURE_LOCATION`: Azure region for the workspace (e.g., `southeastasia`)
+- `AZURE_RAW_DATA_ASSET`, `AZURE_RAW_DATA_VERSION`: Default data asset name/version used by pipeline scripts
+- `AZURE_COMPUTE_INSTANCE_NAME`, `AZURE_COMPUTE_CLUSTER_NAME`: Names used when provisioning compute
+- `COMPUTE_INSTANCE_SIZE`, `COMPUTE_CLUSTER_SIZE`: VM sizes for compute resources
+- `DATA_ASSET_FULL`, `DATA_ASSET_SAMPLE`, `DATA_VERSION`: Data asset names and version tags
+- `MODEL_NAME`, `EXPERIMENT_NAME`: MLflow experiment and registered model identifiers
+- `ENDPOINT_NAME`, `DEPLOYMENT_NAME`: Names used for online endpoint deployment
+
+After filling the placeholders, load the variables in your shell before running any setup scripts:
+
+```bash
+set -a
+source config.env
+set +a
 ```
 
 ### 2. Authenticate with Azure
@@ -62,13 +81,13 @@ If you have uploaded `churn.csv` to your Azure Blob Storage, you can create an A
 
 **Option A: Python (Recommended)**
 ```bash
-python scripts/create_data_asset.py
+python setup/create_data_asset.py
 ```
 
 **Option B: Bash (Azure CLI)**
 ```bash
-./scripts/create_data_asset.sh
+./setup/create_data_asset.sh
 ```
 
-This allows you to reference the dataset in Azure ML pipelines as `azureml:churn-data:1`.
+This allows you to reference the dataset in Azure ML pipelines as `azureml:bank-churn-raw:1`.
 

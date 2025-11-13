@@ -4,61 +4,44 @@ This document outlines the plan and structure for building the Bank Customer Chu
 
 ## Final Project Structure
 
-The final, organized structure of the project is as follows:
-
 ```
-.github/
-└── workflows/          # CI/CD workflows (e.g., GitHub Actions)
-configs/
-├── data.yaml
-├── evaluate.yaml
-├── score.yaml
-└── train.yaml
-data/
+.
+├── aml/
+│   └── components/
+│       ├── data_prep.yaml
+│       └── train.yaml
+├── configs/
+│   ├── data.yaml
+│   ├── hpo.yaml
+│   ├── mlflow.yaml
+│   └── train.yaml
+├── data/
+├── docs/
+│   ├── MLZoomcamp-Project1-ProjectPlan-v2.md
+│   ├── dependencies.md
+│   ├── pipeline_guide.md
+│   └── setup_guide.md
+├── run_hpo.py
+├── run_pipeline.py
+├── setup/
+│   ├── create_data_asset.py
+│   ├── setup.sh
+│   ├── start_compute.sh
+│   └── ...
+├── src/
+│   ├── models/
+│   ├── data_prep.py
+│   ├── extract_best_params.py
+│   └── train.py
+├── Dockerfile
 ├── README.md
-└── sample.csv
-docs/
-├── README.md
-├── pipeline_guide.md
-├── setup_guide.md
-└── ...
-models/                 # (Git-ignored) Trained model artifacts
-notebooks/
-└── eda.ipynb
-setup/
-├── setup.sh
-├── start_compute.sh
-└── ...
-src/
-├── models/
-│   ├── __init__.py
-│   ├── logistic_regression.py
-│   ├── random_forest.py
-│   └── xgboost_model.py
-├── __init__.py
-├── config_loader.py
-├── data_prep.py
-├── evaluate.py
-├── score.py
-└── train.py
-tests/
-├── __init__.py
-├── conftest.py
-├── smoke_test.py
-└── test_data_prep.py
-
-.gitignore
-Dockerfile
-README.md
-requirements.in
-dev-requirements.in
+├── requirements.in / requirements.txt
+└── dev-requirements.in / dev-requirements.txt
 ```
 
 ---
 
 ## Project Setup: Step-by-Step Guide
-
-This guide outlines how to construct the project from a blank slate.
 
 ### Step 1: Set up the Project (Repo + README)
 
@@ -69,83 +52,220 @@ This guide outlines how to construct the project from a blank slate.
 ### Step 2: Add the Dataset
 
 1.  **Create `data/` directory**.
-2.  Add a **small sample** of the dataset to `data/sample.csv`.
-3.  Ensure the full dataset (`data/churn.csv`) is included in `.gitignore`.
+2.  Upload the dataset to Azure ML as a data asset (configured in `config.env`).
 
 ### Step 3: Perform EDA
 
 1.  **Create `notebooks/` directory**.
 2.  Develop `notebooks/eda.ipynb` to analyze the sample data, documenting findings on distributions, correlations, and data quality.
 
-### Step 4: Create Pipeline Scripts
+### Step 4: Create Core Scripts
 
 1.  **Create `src/` directory** and `src/__init__.py`.
-2.  **Develop Core Scripts** with AML/HyperDrive in mind:
-    -   `src/data_prep.py`: deterministic prep stage whose outputs can be reused by CLI and AML components.
-    -   `src/train.py`: trains models, logs to MLflow, supports nested runs and `--set model.param=value` overrides (used by HyperDrive).
-    -   `src/evaluate.py`: evaluates the parent MLflow run and exports plots/metrics.
-    -   `src/score.py`: batch and JSON inference entry point.
-3.  **Refactor Models**: Create a `src/models/` package to hold individual model definitions so HyperDrive sweeps can instantiate clean base estimators.
+2.  **Develop Core Scripts**:
+    -   `src/data_prep.py`: Data preprocessing stage
+    -   `src/train.py`: Model training with MLflow logging (supports `--model-type` for HPO, `--set model.param=value` for overrides)
+    -   `src/extract_best_params.py`: Extract best hyperparameters and model type from MLflow sweep runs, automatically updates config
+3.  **Create `src/models/` package**: Individual model definitions (logreg, rf, xgboost)
 
 ### Step 5: Centralize Configuration
 
 1.  **Create `configs/` directory**.
-2.  **Create YAML files** for each stage:
-    -   `configs/data.yaml`: For data prep settings.
-    -   `configs/train.yaml`: For training settings plus an `hpo` block describing HyperDrive search space, metric, budget, and early-stopping policy.
-    -   `configs/mlflow.yaml`, `configs/evaluate.yaml`, `configs/score.yaml`: Track experiment names and CLI defaults.
-3.  **Create `src/config_loader.py`**: Load YAML files, merge with CLI arguments, and expose helpers used by both CLI scripts and AML components.
-4.  **Update Scripts**: Ensure `data_prep.py` and `train.py` pull defaults from config but remain overrideable via CLI/`--set`.
+2.  **Create YAML files**:
+    -   `configs/data.yaml`: Data prep settings (input/output paths, target column, columns to remove, categorical columns, train/test split)
+    -   `configs/train.yaml`: Training settings (models, hyperparameters, class weights)
+    -   `configs/hpo.yaml`: HPO configuration (search space, metric, budget, early-stopping)
+    -   `configs/mlflow.yaml`: MLflow experiment name
+3.  **Create `src/config_loader.py`**: Utility functions to load YAML files and get nested config values using dot notation
+4.  **Create `hpo_utils.py`**: Utility functions for HPO (loads configs, builds parameter space)
+5.  **Update Scripts**: Ensure scripts pull defaults from config but remain overrideable via CLI arguments
 
-### Step 6: Declare Dependencies
+### Step 6: Create Pipeline Orchestration Scripts
 
-1.  **Create `requirements.in`**: include core libraries (e.g., `pandas`, `scikit-learn`, `mlflow`, `azure-ai-ml`, `azure-identity`, `xgboost`, `imbalanced-learn`).
-2.  **Create `dev-requirements.in`**: add tooling for tests, formatting, and local development (e.g., `pytest`, `pip-tools`).
-3.  **Compile Pinned Versions** (optional but recommended) to keep AML + local environments reproducible:
+1.  **Create `run_hpo.py`**: HPO pipeline with HyperDrive sweep
+    - Uses `hpo_utils.py` to load HPO config from `configs/train.yaml`
+    - Each trial trains one model type (categorical hyperparameter)
+    - Use for: First-time optimization, exploring search spaces
+
+2.  **Create `run_pipeline.py`**: Fixed-hyperparameter training pipeline
+    - Simple pipeline: data_prep → train
+    - Use for: Quick retraining, production deployments, after HPO
+
+### Step 7: Declare Dependencies
+
+1.  **Create `requirements.in`**: Core libraries
+    - Data & ML: pandas, numpy, scikit-learn, imbalanced-learn, xgboost
+    - MLflow: mlflow (experiment tracking)
+    - Azure ML: azure-ai-ml, azure-identity
+    - Utilities: pyyaml, matplotlib, seaborn, scipy
+    - Optional: fastapi (for serving API)
+2.  **Create `dev-requirements.in`**: Development tools
+    - Dependency management: pip-tools
+    - Code quality: black, ruff, isort, pre-commit
+3.  **Compile Pinned Versions** (optional but recommended):
 ```bash
     pip install pip-tools
 pip-compile requirements.in -o requirements.txt
 pip-compile dev-requirements.in -o dev-requirements.txt
 ```
-4.  **Sync environments**: ensure Docker image, local venv, and AML compute all install from the compiled requirements.
+4.  **Sync environments**: Docker image, local venv, and AML compute all install from compiled requirements
 
-### Step 7: Add Tests
 
-1.  **Create `tests/` directory** and `tests/__init__.py`.
-2.  **Write Unit Tests**: e.g., `tests/test_data_prep.py` covering parsing, scaling, metadata generation.
-3.  **Create CLI Smoke Test**: `tests/smoke_test.py` exercises the CLI pipeline (prep → train → evaluate) with deterministic hyperparameters for fast local validation.
-4.  **Create HPO Smoke Test**: `tests/hpo_smoke_test.py` submits a minimal HyperDrive sweep (2-3 trials) to validate the full AML workflow. This test requires Azure ML credentials and is skipped if not configured.
-5.  **Test Strategy**: Use CLI smoke test for quick checks; use HPO smoke test to validate AML integration before full production sweeps.
+### Step 9: Define the Docker Image
 
-### Step 8: Define the Docker Image
-
-1.  **Create `Dockerfile`** in the project root.
-2.  The Dockerfile should:
-    -   Start from a slim Python base image.
-    -   Copy `requirements.txt` and install dependencies first (for layer caching).
-    -   Copy the rest of the application source code.
-3.  **Build and Test** the container to ensure the environment is correct:
+1.  **Create `Dockerfile`** in the project root
+2.  Start from slim Python base image, copy `requirements.txt` first (for layer caching), then application code
+3.  **Build and Test**:
 ```bash
 docker build -t bank-churn:latest .
-docker run --rm -v "$PWD:/app" -w /app bank-churn:latest \
-      bash -lc "pytest -q && python tests/smoke_test.py"
+docker run --rm -v "$PWD:/app" -w /app bank-churn:latest bash -lc "python -m src.data_prep --help"
 ```
+
+### Step 10: Build AML Components
+
+1.  **Create `aml/components/` directory**
+2.  **Create component YAML files**:
+    -   `aml/components/data_prep.yaml`: Data preprocessing component
+    -   `aml/components/train.yaml`: Training component (supports sweep overrides, model_type, and model-specific hyperparameters)
+    -   `aml/components/extract_best_params.yaml`: Component to extract best hyperparameters from MLflow sweep runs (used in HPO pipeline)
+
+### Step 11: Set up Azure ML Workspace
+
+1.  **Create Azure ML workspace** (via Azure Portal or CLI)
+2.  **Create compute cluster**: `cpu-cluster` for training jobs
+3.  **Create data asset**: Register raw dataset as `bank-churn-raw` (version 1)
+4.  **Set up authentication**: Configure `.env` file with Azure credentials:
+    - `AZURE_SUBSCRIPTION_ID`
+    - `AZURE_RESOURCE_GROUP`
+    - `AZURE_WORKSPACE_NAME`
+
+### Step 12: Register Azure ML Environment
+
+1.  **Create and register environment**: `bank-churn-env:1`
+    - **Option A (Python SDK - Dockerfile)**: Register environment from Dockerfile:
+      ```python
+      from azure.ai.ml import MLClient
+      from azure.ai.ml.entities import Environment, BuildContext
+      from azure.identity import DefaultAzureCredential
+      
+      ml_client = MLClient(DefaultAzureCredential(), subscription_id, resource_group, workspace_name)
+      env = Environment(
+          name="bank-churn-env",
+          version="1",
+          build=BuildContext(path=".", dockerfile_path="Dockerfile"),
+          description="Environment for churn prediction pipeline"
+      )
+      ml_client.environments.create_or_update(env)
+      ```
+    - **Option B (Python SDK - conda.yml)**: Create `conda.yml` with pip section, then register:
+      ```python
+      env = Environment(
+          name="bank-churn-env",
+          version="1",
+          conda_file="conda.yml",  # Contains pip section with requirements.txt
+          description="Environment for churn prediction pipeline"
+      )
+      ```
+    - **Option C (Azure CLI)**: `az ml environment create --file environment.yml`
+    - **Option D (Azure ML Studio)**: Create environment via UI from Dockerfile or conda file
+2.  **Verify environment registration**:
+    - **Azure CLI (recommended)**:
+      ```bash
+      az ml environment show --name bank-churn-env --version 1
+      ```
+      The command returns JSON describing the environment, including `image`, `conda_file`, and metadata. A successful response confirms that the environment is registered.
+    - **Python SDK (optional)**:
+      ```python
+      env = ml_client.environments.get(name="bank-churn-env", version="1")
+      print(f"Environment: {env.name}:{env.version}")
+      print(f"Description: {env.description}")
+      print(f"Image: {env.image or 'None'}")
+      if env.build:
+          print(f"Build context: {env.build.path}, Dockerfile: {env.build.dockerfile_path}")
+      if env.conda_file:
+          print(f"Conda file: {env.conda_file}")
+      ```
+    - **Azure ML Studio**: Navigate to Environments -> `bank-churn-env:1` and confirm details in the UI
+3.  **Verify dependencies**: Ensure all dependencies from `requirements.txt` are available in the environment
+4.  **Note**: All components reference `azureml:bank-churn-env:1` for consistent dependencies
+
+### Step 13: Test Pipeline Execution
+
+1.  **Test data prep component**: Run data preprocessing pipeline
+2.  **Test training pipeline**: Run `run_pipeline.py` with sample data
+3.  **Test HPO pipeline**: Run `run_hpo.py` with small budget (e.g., 2-3 trials)
+4.  **Verify outputs**: Check MLflow runs, model artifacts, and metrics
+
+---
+
+## Pipeline Entry Points
+
+### `run_hpo.py` - Hyperparameter Optimization
+
+- Runs HyperDrive sweep to find best hyperparameters
+- Each trial trains one model type (logreg, rf, or xgboost) with its hyperparameters
+- Efficient: 1 model per trial (3x reduction in compute cost)
+- **Use when**: First-time optimization, exploring new search spaces
+- **Outputs**: Best hyperparameters and model type from sweep results
+
+### `run_pipeline.py` - Fixed-Hyperparameter Training
+
+- Trains models with known good hyperparameters from `configs/train.yaml`
+- Fast execution (no sweep overhead)
+- Simple pipeline: data_prep → train
+- **Use when**: Quick retraining, production deployments, after HPO
+- **Outputs**: Trained model artifacts and MLflow run ID
+
+### Typical Workflow
+
+1. Run `run_hpo.py` to find best hyperparameters
+2. Extract best hyperparameters and update config: `src/extract_best_params.py`
+3. Update `configs/train.yaml` with best hyperparameters
+4. Run `run_pipeline.py` for quick training with optimized hyperparameters
 
 ---
 
 ## Hyperparameter Strategy
 
-We adopt an Azure ML HyperDrive-first pipeline. The single-run CLI/AML jobs remain for quick validation, but the primary orchestration will be:
+- **HPO Approach**: `model_type` is treated as a categorical hyperparameter
+  - Each trial trains only one model type (logreg, rf, or xgboost)
+  - Model-specific hyperparameters included conditionally based on `model_type`
+  - Efficient: 1 model per trial (3x reduction in compute cost)
+  - Best model type logged as `model_type` tag in MLflow
 
-1. Use the `train` HyperDrive sweep to explore the search space defined in `configs/train.yaml` (data_prep runs once, train.sweep evaluates candidates).
-2. Promote the best trial's parameters into `configs/train.yaml` (training.hyperparameters) for any follow-up single-run jobs.
-3. Evaluate and package the selected run for downstream deployment/monitoring.
+- **Model Logging**: Models logged with MLflow including:
+  - `pip_requirements`: Embedded dependencies for portability
+  - `signature`: Model input/output schema
+  - `input_example`: Sample input for testing
+  - Azure ML deployment uses registered environment (`azureml:bank-churn-env:1`)
+
+---
+
+## Implementation Details
+
+### Model Training & Logging
+
+- Three models supported: Logistic Regression (`logreg`), Random Forest (`rf`), XGBoost (`xgboost`)
+- Models logged with `mlflow.sklearn.log_model()` including `pip_requirements`, `signature`, `input_example`
+- Models support MLflow pyfunc deployment (no custom scoring script needed)
+- `predict_probabilities()` raises explicit error if model lacks `predict_proba` (no misleading fallbacks)
+
+### Deployment Strategy
+
+- **MLflow pyfunc deployment**: Models deployed directly to Azure ML online endpoints
+- **Dual environment support**:
+  - Azure ML deployment: Uses registered environment (`azureml:bank-churn-env:1`)
+  - Local serving: Uses embedded `pip_requirements` (e.g., `mlflow models serve`)
+
+---
 
 ## Future Plans
 
--   **Step 9: Build AML command components (data_prep, train) ready for sweep overrides**
--   **Step 10: Create and submit the HyperDrive sweep pipeline (data_prep → train.sweep)**
--   **Step 11: Capture best trial metrics/params, update configs/train.yaml**
--   **Step 12: Register best model artifact + document promotion workflow**
--   **Step 13: Add a Makefile for common commands**
--   **Step 14: Deploy safely (staging → prod)**
+- **Step 14: Add a Makefile** for common commands
+- **Step 15: Implement staging/prod deployment** with promotion control
+  - Create `deploy.py` with staging/prod support
+  - Add `--stage` flag to `run_pipeline.py --deploy`
+  - Implement smoke tests and promotion workflow
+- **Step 16: Add scheduled pipeline execution**
+  - Create `schedule_pipeline.py` for Azure ML Schedule management
+  - Support daily, weekly, monthly, and cron-based schedules

@@ -1,86 +1,88 @@
-# Pipeline Guide
+# HyperDrive Pipeline Guide
 
-This guide details the steps and scripts involved in the end-to-end machine learning pipeline, from data preparation to model scoring.
+This guide walks through the churn pipeline when driven entirely by Azure ML HyperDrive. Each script/component plays a specific role from data preparation through scoring.
 
-## Step 1: Data Preparation (`src/data_prep.py`)
+## 1. Data Preparation (`src/data_prep.py`)
 
-This script prepares the raw data for model training.
+Used in two contexts:
+- **Azure ML component** (`aml/components/data_prep.yaml`) – runs once per sweep to materialise processed data in the workspace.
+- **Local parity** – optional local execution keeps evaluation/scoring aligned with the sweep output.
 
-**Features:**
-- Removes uninformative columns (e.g., `RowNumber`, `CustomerId`).
-- Encodes categorical features (`Geography`, `Gender`).
-- Scales numerical features using `StandardScaler`.
-- Performs a stratified train/test split to maintain class distribution.
-- Saves the processed data (`X_train`, `X_test`, `y_train`, `y_test`) and preprocessing artifacts (`encoders.pkl`, `scaler.pkl`).
+Key behaviours:
+- Drops ID columns (`RowNumber`, `CustomerId`, `Surname`).
+- Label-encodes categorical features and persists encoders.
+- Scales numeric columns via `StandardScaler` (fit on train, transform on test).
+- Produces `X_train.csv`, `X_test.csv`, `y_train.csv`, `y_test.csv`, plus `encoders.pkl`, `scaler.pkl`, and `metadata.json`.
 
-**Usage:**
+Usage (local parity):
 ```bash
-python src/data_prep.py --config configs/data.yaml
+python src/data_prep.py --config configs/data.yaml --output data/processed
 ```
 
-## Step 2: Model Training (`src/train.py`)
+## 2. HyperDrive Sweep (`run_hpo.py` + `aml/components/train.yaml`)
 
-This script trains multiple machine learning models and compares their performance.
+`run_hpo.py` is the primary entry point. It:
+1. Loads Azure ML credentials (see `config.env`).
+2. Reads the HyperDrive configuration from `configs/hpo.yaml` (metric, mode, budget, search space, early stopping).
+3. Builds a DSL pipeline:
+   - `data_prep` component → processed dataset (uri_folder output).
+   - `train` component launched with `.sweep(...)` so HyperDrive explores the search space.
+4. Submits the job and prints the Studio URL.
 
-**Features:**
-- Trains Logistic Regression, Random Forest, and XGBoost (if installed).
-- Handles class imbalance using `class_weight='balanced'` or SMOTE (`--use-smote`).
-- Logs comprehensive metrics (Accuracy, Precision, Recall, F1, ROC-AUC).
-- Compares models and identifies the best performer based on F1 score.
-- Supports MLflow for experiment tracking.
-
-**Usage:**
-```bash
-python src/train.py --config configs/train.yaml
+`aml/components/train.yaml` maps the search space to CLI overrides on `train.py`:
+```yaml
+command: >-
+  python train.py   --data ${{inputs.processed_data}}   --model-artifact-dir ${{outputs.model_output}}   --parent-run-id-output ${{outputs.parent_run_id}}   $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
+  ...
 ```
 
-## Step 3: Model Evaluation (`src/evaluate.py`)
+Each trial:
+- Applies the proposed hyperparameters via `--set model.param=value`.
+- Trains the configured models (typically Random Forest for the sweep) and logs nested MLflow runs.
+- Tags the parent run with `best_model` and `best_model_run_id`.
+- Emits artifacts to the component output (`model_output`) and logs metrics like `best_model_f1`.
 
-This script provides a comprehensive evaluation of a trained model.
+HyperDrive picks the best trial based on the configured metric.
 
-**Features:**
-- Calculates a full suite of classification metrics.
-- Generates and saves key visualizations:
-  - Confusion Matrix
-  - ROC Curve
-  - Precision-Recall Curve
-  - Prediction Distribution
-  - Feature Importance
-- Saves a detailed `evaluation_report.json`.
+## 3. Extract Best Hyperparameters
 
-**Usage:**
+After the sweep completes, extract the best hyperparameters and update the training configuration:
+
 ```bash
-python src/evaluate.py \
-  --model models/local/rf_model.pkl \
-  --data data/processed \
-  --output evaluation/rf
+python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
 ```
 
-## Step 4: Model Scoring (`src/score.py`)
+This script:
+- Extracts best hyperparameters from the HPO sweep
+- Automatically updates `configs/train.yaml` with the best model and hyperparameters
+- Sets `models: [best_model]` to train only the best model found
 
-This script uses a trained model to make predictions on new data.
+## 4. Configuration (`configs/hpo.yaml` and `configs/train.yaml`)
 
-**Features:**
-- Supports batch scoring from CSV files.
-- Supports single predictions from JSON (ideal for APIs).
-- Automatically applies the same preprocessing steps used during training.
+**`configs/hpo.yaml`** defines the HyperDrive sweep:
+- `metric` / `mode` – e.g., maximise F1.
+- `budget.max_trials` / `budget.max_concurrent` – sweep size and parallelism.
+- `early_stopping` – enables `MedianStoppingPolicy` during sweeps.
+- `search_space` – candidate values per model (Random Forest, XGBoost, etc.).
 
-**Usage (Batch):**
-```bash
-python src/score.py \
-  --model models/local/rf_model.pkl \
-  --data-dir data/processed \
-  --input data/new_customers.csv \
-  --output predictions/predictions.csv
-```
+**`configs/train.yaml`** contains:
+- `models` – list of models to train (should be only the best model after HPO)
+- `hyperparameters` – hyperparameters for each model (updated with best values after HPO)
 
-**Usage (Single):**
-```bash
-python src/score.py \
-  --model models/local/rf_model.pkl \
-  --data-dir data/processed \
-  --input customer.json \
-  --output result.json \
-  --json
-```
+`run_hpo.py` converts the search space lists into Azure ML `Choice` distributions.
 
+## 5. Typical Workflow
+
+1. Update `configs/hpo.yaml` with the search space for hyperparameter optimization.
+2. Run `python run_hpo.py` to submit the HyperDrive sweep.
+3. Track progress in Azure ML Studio; capture the parent run ID when complete.
+4. Extract best hyperparameters and update config:
+   ```bash
+   python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
+   ```
+5. Train the best model with optimized hyperparameters:
+   ```bash
+   python run_pipeline.py
+   ```
+
+That's the entire HyperDrive-first loop: configuration-driven sweeps, automatic best parameter extraction, and production-ready training.

@@ -41,11 +41,8 @@ def parse_bool(value: Any, *, default: bool) -> bool:
     raise ValueError(f"Cannot interpret value '{value}' as boolean.")
 
 def load_data(path: Path) -> pd.DataFrame:
-    """Read the raw CSV and report basic shape."""
-    print(f"Loading data from: {path}")
-    df = pd.read_csv(path)
-    print(f"  Loaded {len(df)} rows, {len(df.columns)} columns")
-    return df
+    """Read the raw CSV."""
+    return pd.read_csv(path)
 
 
 def remove_columns(df: pd.DataFrame, columns: Iterable[str]) -> Tuple[pd.DataFrame, List[str]]:
@@ -53,7 +50,6 @@ def remove_columns(df: pd.DataFrame, columns: Iterable[str]) -> Tuple[pd.DataFra
     to_drop = [col for col in columns if col in df.columns]
     if to_drop:
         df = df.drop(columns=to_drop)
-        print(f"Removed columns: {', '.join(to_drop)}")
     return df, to_drop
 
 
@@ -147,7 +143,6 @@ def prepare_data(
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y if stratify else None
     )
-    print(f"Split: {len(X_train)} train / {len(X_test)} test samples")
 
     X_train_encoded, encoders = encode_categoricals(X_train, categorical_cols=categorical_cols)
     X_test_encoded, _ = encode_categoricals(X_test, categorical_cols=categorical_cols, encoders=encoders)

@@ -1,5 +1,6 @@
 # Use an official Python runtime as a parent image
-FROM python:3.12-slim
+# Using Python 3.9 because azureml-core 1.1.5.7 is not compatible with Python 3.10+
+FROM python:3.9-slim
 
 # Set the working directory in the container
 WORKDIR /app

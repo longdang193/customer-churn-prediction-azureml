@@ -14,7 +14,6 @@ outputs:
 code: ../../src
 
 environment: azureml:bank-churn-env:1
-compute: azureml:cpu-cluster
 
 command: >-
   python data_prep.py 

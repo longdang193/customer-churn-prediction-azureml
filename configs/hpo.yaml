@@ -1,0 +1,72 @@
+# Hyperparameter Optimization (HPO) Configuration
+# Used by run_hpo.py for HyperDrive sweeps
+# Uncomment the section you want to use (test or production)
+
+# TEST CONFIGURATION - Quick runs for validation
+# Uncomment this section for testing, comment out production section below
+# Primary optimization metric and direction
+metric: "f1"           # e.g., f1, roc_auc, recall, precision, accuracy
+mode: "max"            # "max" or "min"
+
+# Budget configuration (small for testing)
+budget:
+  max_trials: 3           # Small number for quick testing
+  max_concurrent: 2       # Limit concurrent trials
+
+# Early stopping configuration
+early_stopping:
+  enabled: false         # Disabled for test runs
+  patience: 2            # Number of trials to wait before stopping
+
+# Search space for HPO (smaller for testing)
+# model_type is treated as a categorical hyperparameter - each trial trains only one model
+search_space:
+  # Model types to optimize (at least one required)
+  # logreg: {}  # Commented out - no hyperparameters to optimize
+  rf:         # Random Forest
+    n_estimators: [100, 200]     # tree count
+    max_depth: [6, 10]           # depth limits
+    min_samples_split: [2, 5]    # split thresholds (must be >= 2)
+    min_samples_leaf: [1, 2]     # leaf thresholds
+  xgboost:  # XGBoost hyperparameter search space
+    n_estimators: [100, 200]
+    max_depth: [3, 6]
+    learning_rate: [0.05, 0.1]
+
+# Sampling algorithm for HyperDrive
+sampling_algorithm: "random"  # Options: "random", "grid", "bayesian"
+
+# PRODUCTION CONFIGURATION - Comprehensive optimization
+# Uncomment this section for production, comment out test section above
+# metric: "f1"           # e.g., f1, roc_auc, recall, precision, accuracy
+# mode: "max"            # "max" or "min"
+# 
+# # Budget configuration (larger for production)
+# budget:
+#   max_trials: 20          # More trials for better optimization
+#   max_concurrent: 4       # More parallel trials
+# 
+# # Early stopping configuration
+# early_stopping:
+#   enabled: true          # Enabled for production runs
+#   patience: 5            # More patience for production runs
+# 
+# # Search space for HPO (comprehensive)
+# # model_type is treated as a categorical hyperparameter - each trial trains only one model
+# search_space:
+#   # Model types to optimize (at least one required)
+#   # logreg: {}  # Commented out - no hyperparameters to optimize
+#   rf:         # Random Forest
+#     n_estimators: [50, 100, 200, 300]     # Wider range
+#     max_depth: [4, 6, 8, 10, null]         # More depth options including unlimited
+#     min_samples_split: [2, 5, 10]         # More split options
+#     min_samples_leaf: [1, 2, 4]           # More leaf options
+#   xgboost:  # XGBoost hyperparameter search space
+#     n_estimators: [50, 100, 200, 300]
+#     max_depth: [3, 4, 5, 6, 7]
+#     learning_rate: [0.01, 0.05, 0.1, 0.2]
+#     subsample: [0.6, 0.8, 1.0]
+#     colsample_bytree: [0.6, 0.8, 1.0]
+# 
+# # Sampling algorithm for HyperDrive
+# sampling_algorithm: "random"  # Options: "random", "grid", "bayesian"

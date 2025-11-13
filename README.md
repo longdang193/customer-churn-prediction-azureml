@@ -1,138 +1,223 @@
 # Bank Customer Churn Prediction with Azure ML
 
-This project demonstrates an end-to-end MLOps pipeline for predicting bank customer churn using Azure Machine Learning. It covers data preparation, model training, evaluation, and scoring, all organized into a clean, reproducible structure.
+This repo delivers a HyperDrive-first MLOps workflow for bank customer churn prediction. Azure Machine Learning orchestrates hyperparameter sweeps, while MLflow tracks every trial so you can evaluate, promote, and score the best model with confidence.
 
 ## Project Overview
 
-The goal is to predict whether a bank customer will churn (exit) based on their attributes. This is a binary classification problem. The pipeline is designed to be run both locally for development and on Azure ML for production-scale training and deployment.
+- **Problem**: binary classification of bank customers into churn / retain classes.
+- **Models**: Supports three models - Logistic Regression (`logreg`), Random Forest (`rf`), and XGBoost (`xgboost`)
+- **Approach**: submit an Azure ML HyperDrive sweep that runs the data-prep and train components, searches the space defined in `configs/hpo.yaml`, and logs every trial to MLflow.
+- **Follow-up**: after the sweep completes, extract best hyperparameters and train the optimized model. Models are saved as pickle files and can be deployed.
 
 ### Key Features
 
-- **End-to-End Pipeline**: Scripts for data prep, training, evaluation, and scoring.
-- **Configuration Driven**: YAML files in `configs/` control the pipeline's behavior.
-- **MLflow Integrated**: Automated experiment tracking for parameters, metrics, and model artifacts.
-- **Multiple Models**: Supports Logistic Regression, Random Forest, and XGBoost.
-- **Testing**: Includes unit tests (`pytest`) and a robust end-to-end smoke test.
-- **Dockerized Environment**: A `Dockerfile` ensures a reproducible environment for local and cloud execution.
-- **Azure ML Ready**: Includes component definitions (`aml/`) and a pipeline script (`run_pipeline.py`) for easy deployment on Azure.
+- **Two pipeline options** – HPO sweep pipeline and quick training pipeline
+- **Configuration driven** – YAML files in `configs/` centralize data prep, training defaults, MLflow settings, and the HyperDrive search space
+- **MLflow integration** – each trial logs parameters, metrics (e.g. `f1`), and artifacts, enabling reproducible model promotion
+- **Robust preprocessing** – shared utilities ensure the same feature engineering is applied during training and inference
+- **Reproducible environment** – a Dockerfile and pinned `requirements.txt` make local, Docker, and AML environments consistent
 
 ## Project Structure
 
 ```
 .
-├── aml/                  # Azure ML component and pipeline definitions
-├── configs/              # YAML configuration files for the pipeline
-├── data/                 # Raw and sample data
-├── docs/                 # Detailed project documentation
-├── evaluation/           # (Git-ignored) Evaluation reports and plots
-├── models/               # (Git-ignored) Trained model artifacts
-├── notebooks/            # Jupyter notebooks for EDA
-├── predictions/          # (Git-ignored) Scored model outputs
-├── setup/                # Scripts for setting up local and Azure environments
-├── src/                  # Python source code for the ML pipeline
-│   ├── models/           # Model definitions
-│   ├── config_loader.py  # Utility for loading YAML configs
-│   ├── data_prep.py      # Data preparation script
-│   ├── train.py          # Model training script
-│   ├── evaluate.py       # Model evaluation script
-│   └── score.py          # Model scoring/inference script
-├── tests/                # Test suite for the project
-│   ├── test_data_prep.py # Unit tests for data preparation
-│   └── smoke_test.py     # End-to-end smoke test
-├── Dockerfile            # Defines the containerized environment
-├── README.md             # This file
-├── requirements.in       # Application dependencies
-└── dev-requirements.in   # Development dependencies
+├── aml/
+│   └── components/              # Azure ML component definitions
+│       ├── data_prep.yaml      # Data preprocessing component
+│       ├── extract_best_params.yaml  # Extract best params component
+│       └── train.yaml          # Training component
+├── configs/                     # Configuration files
+│   ├── data.yaml               # Data preparation settings
+│   ├── hpo.yaml                # Hyperparameter optimization (test/production)
+│   ├── mlflow.yaml             # MLflow tracking configuration
+│   ├── train.yaml              # Training config (best model + hyperparameters)
+│   └── README.md               # Config documentation
+├── data/                       # Data directory (local artifacts, gitignored)
+├── docs/                       # Documentation
+│   ├── MLZoomcamp-Project1-ProjectPlan-v2.md
+│   ├── dependencies.md
+│   ├── pipeline_guide.md
+│   ├── setup_guide.md
+│   └── TROUBLESHOOTING.md
+├── src/                        # Source code
+│   ├── config_loader.py        # Configuration loading utilities
+│   ├── data_prep.py            # Data preprocessing script
+│   ├── extract_best_params.py  # Extract best params from HPO and update config
+│   ├── train.py                # Model training script
+│   ├── models/                 # Model definitions (logreg, rf, xgboost)
+│   └── README.md               # Source code documentation
+├── setup/                      # Setup scripts
+│   ├── setup.sh/.ps1          # Initial Azure ML setup
+│   └── README.md               # Common Azure ML commands
+├── hpo_utils.py                # HPO configuration utilities
+├── run_hpo.py                  # Submit HPO sweep pipeline
+├── run_pipeline.py             # Submit training pipeline
+├── config.env.example          # Example environment configuration
+├── Dockerfile                  # Docker image definition
+├── requirements.in             # Python dependencies (source)
+├── requirements.txt            # Python dependencies (pinned)
+├── dev-requirements.in         # Development dependencies (source)
+└── dev-requirements.txt        # Development dependencies (pinned)
 ```
+
+**Note**: The following folders contain local artifacts and are gitignored:
+- `data/processed*` - Processed data outputs
+- `evaluation/` - Evaluation outputs
+- `models/` - Trained model artifacts
+- `predictions/` - Prediction outputs
+- `logs/` - Log files
+- `mlruns/` - MLflow local tracking data
 
 ## Getting Started
 
-### 1. Setup
-
-Clone the repository and install the required dependencies.
+### 1. Environment Setup
 
 ```bash
 # Clone the repository
 git clone <your-repo-url>
-cd <your-repo-name>
+cd customer-churn-prediction-azureml
+
+# (Optional) create a virtual environment
+python -m venv .venv && source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Run the Full Pipeline (Local)
+### 2. Configure Azure ML
 
-The following commands will run the entire pipeline using the sample data and default configurations.
-
-```bash
-# 1. Prepare the data (uses configs/data.yaml)
-python src/data_prep.py
-
-# 2. Train the models (uses configs/train.yaml and mlflow.yaml)
-python src/train.py
-
-# 3. Evaluate the best model (e.g., Random Forest)
-python src/evaluate.py --model models/local/rf_model.pkl --data data/processed --output evaluation/rf
-
-# 4. Score new data
-python src/score.py --model models/local/rf_model.pkl --data-dir data/processed --input data/sample.csv --output predictions/sample_predictions.csv
-```
-
-### 3. View Experiments with MLflow UI
-
-After running the training script, you can inspect the results using the MLflow UI.
+Create a `config.env` file (or export the variables) with your workspace details:
 
 ```bash
-#low UI
-mlflow ui
+AZURE_SUBSCRIPTION_ID=<subscription>
+AZURE_RESOURCE_GROUP=<resource-group>
+AZURE_WORKSPACE_NAME=<workspace>
+AZURE_RAW_DATA_ASSET=<data-asset-name>
+AZURE_RAW_DATA_VERSION=<data-version>
 ```
 
-This will start a local server, typically at `http://127.0.0.1:5000`, where you can view your experiment runs, compare metrics, and see the logged artifacts.
+Authenticate with Azure (`az login`) before submitting jobs.
 
-### 4. Build and Test with Docker
+**Note**: Data is loaded from Azure ML data assets. Configure the data asset name and version in `config.env`.
 
-To ensure a consistent and reproducible environment, you can build the Docker image and run the tests inside the container.
+### 3. Configuration Files
+
+The project uses YAML configuration files in `configs/`:
+
+- **`hpo.yaml`** – Hyperparameter optimization settings (test/production sections)
+- **`train.yaml`** – Training configuration with best model and hyperparameters (test/production sections)
+- **`data.yaml`** – Data preparation settings
+- **`mlflow.yaml`** – MLflow tracking configuration
+
+**Important**: Both `hpo.yaml` and `train.yaml` have test and production sections. Uncomment the section you want to use.
+
+### 4. Typical Workflow
+
+#### Step 1: Run HPO (Find Best Model and Hyperparameters)
 
 ```bash
-# 1. Build the Docker image
-docker build -t bank-churn:latest .
-
-# 2. Run the test suite inside the container
-docker run --rm -v "$PWD:/app" -w /app bank-churn:latest \
-  bash -lc "pytest -q && python tests/smoke_test.py"
+python run_hpo.py
 ```
 
-### 5. Run Tests
+This will:
+- Run a HyperDrive sweep that trains all models (`rf`, `xgboost`) in each trial
+- Each trial trains one model type with sampled hyperparameters from `configs/hpo.yaml`
+- Selects the best trial based on F1 score
+- Logs all trials to MLflow
 
-To ensure everything is working correctly, run the test suite.
+**After HPO completes:**
+1. Get the parent run ID from Azure ML Studio (the sweep job run ID)
+2. Extract best hyperparameters and update config:
+   ```bash
+   python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
+   ```
+   This automatically:
+   - Extracts best hyperparameters from the HPO sweep
+   - Updates `configs/train.yaml` with the best model and hyperparameters
+   - Sets `models: [best_model]` (only one model)
 
-```bash
-# Run unit tests
-pytest
-
-# Run the end-to-end smoke test
-python tests/smoke_test.py
-
-# Run the smoke test with HPO enabled
-SMOKE_HPO=1 SMOKE_HPO_MODEL=rf python tests/smoke_test.py
-```
-
-## Running the Pipeline on Azure ML
-
-To run the full training pipeline on Azure Machine Learning, ensure your `.env` file is correctly configured and that you have authenticated with Azure (`az login`). Then, execute the pipeline script:
+#### Step 2: Train Best Model (After HPO)
 
 ```bash
 python run_pipeline.py
 ```
 
-This will submit a new pipeline job to your Azure ML workspace and print a link to view the run in the studio.
+This will:
+- Use the best model and hyperparameters from `configs/train.yaml` (updated in Step 1)
+- Run data prep → train pipeline
+- Save the trained model as a pickle file
+- Fast single run (no HPO overhead)
+- Perfect for production retraining
+
+**Note**: The `train.yaml` config file should contain only the best model from HPO. The `extract_best_params.py` script automatically sets this.
+
+### 5. Configuration: Test vs Production
+
+Both `configs/hpo.yaml` and `configs/train.yaml` have test and production sections:
+
+**For Testing:**
+- Smaller budgets (fewer trials)
+- Limited search spaces
+- Faster execution
+
+**For Production:**
+- Larger budgets (more trials)
+- Comprehensive search spaces
+- Better optimization
+
+Switch between them by commenting/uncommenting the appropriate section in each file.
+
+### 6. Deploy and Score Models
+
+Models are saved as pickle files during training and can be deployed:
+
+- **Model files**: Saved to Azure ML outputs directory during training
+- **MLflow tracking**: All runs are tracked in MLflow for experiment management
+- **Model artifacts**: Models and metadata are automatically captured by Azure ML
+
+### 7. Inspect Experiments with MLflow
+
+If you mirror the MLflow tracking URI locally, launch the UI to explore runs:
+
+```bash
+mlflow ui --backend-store-uri "${MLFLOW_TRACKING_URI}" --port 5000
+```
+
+
+## Running on Azure ML
+
+All pipelines load component specs from `aml/components/` and read configuration from:
+- `configs/hpo.yaml` for HPO sweeps
+- `configs/train.yaml` for training runs
 
 ## Documentation
 
-For more detailed information, please refer to the guides in the `docs/` directory:
+- `docs/MLZoomcamp-Project1-ProjectPlan-v2.md` – project plan and history
+- `docs/pipeline_guide.md` – deep dive into the scripts and components
+- `docs/setup_guide.md` – step-by-step setup instructions
+- `docs/dependencies.md` – guidance on dependency management and pinning
+- `docs/TROUBLESHOOTING.md` – common errors and solutions
 
-- **[Project Plan](docs/MLZoomcamp-Project1-ProjectPlan-v2.md)**: The development plan and history of the project.
-- **[Pipeline Guide](docs/pipeline_guide.md)**: Detailed explanation of each script in the ML pipeline.
-- **[Setup Guide](docs/setup_guide.md)**: Instructions for local and Azure ML setup.
-- **[SMOTE Comparison](docs/smote_comparison.md)**: Analysis of using SMOTE for class imbalance.
-- **[Dependencies Guide](docs/dependencies.md)**: Information on managing Python dependencies.
+## Quick Reference
+
+**HPO Workflow:**
+```bash
+# 1. Run HPO
+python run_hpo.py
+
+# 2. Extract best params and update config (after HPO completes)
+python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
+
+# 3. Train best model
+python run_pipeline.py
+```
+
+**Optional flags for `extract_best_params.py`:**
+- `--output <file>` – Save params to JSON file (optional)
+- `--no-update-config` – Skip config update (extract only)
+- `--dry-run` – Preview changes without updating
+- `--config <path>` – Specify config file (default: `configs/train.yaml`)
+
+---
+
+Need help or want to extend the workflow? Open an issue or start a discussion!

@@ -1,0 +1,27 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+name: extract_best_params
+version: 1
+type: command
+
+inputs:
+  parent_run_id_file:
+    type: uri_file
+  metric:
+    type: string
+    optional: true
+    default: "f1"
+
+outputs:
+  best_params_json:
+    type: uri_file
+
+code: ../../src
+
+environment: azureml:bank-churn-env:1
+
+command: >-
+  python extract_best_params.py
+  --parent-run-id-file ${{inputs.parent_run_id_file}}
+  --output ${{outputs.best_params_json}}
+  --metric ${{inputs.metric}}
+
