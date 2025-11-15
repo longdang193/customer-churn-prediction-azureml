@@ -28,10 +28,10 @@ search_space:
     max_depth: [6, 10]           # depth limits
     min_samples_split: [2, 5]    # split thresholds (must be >= 2)
     min_samples_leaf: [1, 2]     # leaf thresholds
-  xgboost:  # XGBoost hyperparameter search space
-    n_estimators: [100, 200]
-    max_depth: [3, 6]
-    learning_rate: [0.05, 0.1]
+  # xgboost:  # XGBoost hyperparameter search space
+  #   n_estimators: [100, 200]
+  #   max_depth: [3, 6]
+  #   learning_rate: [0.05, 0.1]
 
 # Sampling algorithm for HyperDrive
 sampling_algorithm: "random"  # Options: "random", "grid", "bayesian"

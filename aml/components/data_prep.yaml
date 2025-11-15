@@ -5,7 +5,7 @@ type: command
 
 inputs:
   raw_data: 
-    type: uri_file
+    type: uri_folder
 
 outputs:
   processed_data:

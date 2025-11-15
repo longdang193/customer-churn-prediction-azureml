@@ -9,7 +9,9 @@ This document outlines the plan and structure for building the Bank Customer Chu
 ├── aml/
 │   └── components/
 │       ├── data_prep.yaml
-│       └── train.yaml
+│       ├── extract_best_params.yaml
+│       ├── train.yaml          # Regular training component (fixed hyperparameters)
+│       └── hpo.yaml            # HPO training component (hyperparameter sweeps)
 ├── configs/
 │   ├── data.yaml
 │   ├── hpo.yaml
@@ -53,6 +55,10 @@ This document outlines the plan and structure for building the Bank Customer Chu
 
 1.  **Create `data/` directory**.
 2.  Upload the dataset to Azure ML as a data asset (configured in `config.env`).
+   - **Important**: The data asset must be registered as `uri_folder` (directory containing CSV file(s))
+   - The `data_prep` component accepts `uri_folder` input and automatically loads all CSV files in the folder
+   - If multiple CSV files are present, they will be concatenated together (useful for splitting large datasets across multiple files)
+   - Example: Register a folder containing `churn.csv` (or multiple CSV files) as `uri_folder` type
 
 ### Step 3: Perform EDA
 
@@ -64,8 +70,8 @@ This document outlines the plan and structure for building the Bank Customer Chu
 1.  **Create `src/` directory** and `src/__init__.py`.
 2.  **Develop Core Scripts**:
     -   `src/data_prep.py`: Data preprocessing stage
-    -   `src/train.py`: Model training with MLflow logging (supports `--model-type` for HPO, `--set model.param=value` for overrides)
-    -   `src/extract_best_params.py`: Extract best hyperparameters and model type from MLflow sweep runs, automatically updates config
+    -   `src/train.py`: Model training with MLflow logging (supports `--model-type` for HPO mode, `--set model.param=value` for hyperparameter overrides). In regular mode, models are determined from `configs/train.yaml` → `training.models`.
+    -   `src/extract_best_params.py`: Extract best hyperparameters and model type from MLflow sweep runs, automatically updates `configs/train.yaml`
 3.  **Create `src/models/` package**: Individual model definitions (logreg, rf, xgboost)
 
 ### Step 5: Centralize Configuration
@@ -83,12 +89,17 @@ This document outlines the plan and structure for building the Bank Customer Chu
 ### Step 6: Create Pipeline Orchestration Scripts
 
 1.  **Create `run_hpo.py`**: HPO pipeline with HyperDrive sweep
-    - Uses `hpo_utils.py` to load HPO config from `configs/train.yaml`
-    - Each trial trains one model type (categorical hyperparameter)
+    - Uses `hpo_utils.py` to load HPO config from `configs/hpo.yaml`
+    - Uses `aml/components/hpo.yaml` component for training
+    - Each trial trains one model type (categorical hyperparameter) with sampled hyperparameters
+    - Automatically loads `config.env` for Azure ML configuration
     - Use for: First-time optimization, exploring search spaces
 
 2.  **Create `run_pipeline.py`**: Fixed-hyperparameter training pipeline
+    - Uses `aml/components/train.yaml` component for training
     - Simple pipeline: data_prep → train
+    - Models determined from `configs/train.yaml` → `training.models`
+    - Automatically loads `config.env` for Azure ML configuration
     - Use for: Quick retraining, production deployments, after HPO
 
 ### Step 7: Declare Dependencies
@@ -126,75 +137,101 @@ docker run --rm -v "$PWD:/app" -w /app bank-churn:latest bash -lc "python -m src
 1.  **Create `aml/components/` directory**
 2.  **Create component YAML files**:
     -   `aml/components/data_prep.yaml`: Data preprocessing component
-    -   `aml/components/train.yaml`: Training component (supports sweep overrides, model_type, and model-specific hyperparameters)
-    -   `aml/components/extract_best_params.yaml`: Component to extract best hyperparameters from MLflow sweep runs (used in HPO pipeline)
+    -   `aml/components/train.yaml`: Training component for regular training (fixed hyperparameters from config)
+    -   `aml/components/hpo.yaml`: Training component for HPO sweeps (accepts hyperparameters as inputs for sweep)
+    -   `aml/components/extract_best_params.yaml`: Component to extract best hyperparameters from MLflow sweep runs (optional, can be run locally)
 
 ### Step 11: Set up Azure ML Workspace
 
 1.  **Create Azure ML workspace** (via Azure Portal or CLI)
 2.  **Create compute cluster**: `cpu-cluster` for training jobs
-3.  **Create data asset**: Register raw dataset as `bank-churn-raw` (version 1)
-4.  **Set up authentication**: Configure `.env` file with Azure credentials:
+3.  **Create data asset**: Register raw dataset as `uri_folder` type (name and version configured in `config.env`)
+4.  **Set up authentication**: Create `config.env` file with Azure credentials:
     - `AZURE_SUBSCRIPTION_ID`
     - `AZURE_RESOURCE_GROUP`
     - `AZURE_WORKSPACE_NAME`
+    - `AZURE_RAW_DATA_ASSET`: Name of registered data asset
+    - `AZURE_RAW_DATA_VERSION`: Version of data asset
+    - **Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`
 
-### Step 12: Register Azure ML Environment
+### Step 12: Build Docker Image and Register Azure ML Environment
 
-1.  **Create and register environment**: `bank-churn-env:1`
-    - **Option A (Python SDK - Dockerfile)**: Register environment from Dockerfile:
-      ```python
-      from azure.ai.ml import MLClient
-      from azure.ai.ml.entities import Environment, BuildContext
-      from azure.identity import DefaultAzureCredential
-      
-      ml_client = MLClient(DefaultAzureCredential(), subscription_id, resource_group, workspace_name)
-      env = Environment(
-          name="bank-churn-env",
-          version="1",
-          build=BuildContext(path=".", dockerfile_path="Dockerfile"),
-          description="Environment for churn prediction pipeline"
-      )
-      ml_client.environments.create_or_update(env)
-      ```
-    - **Option B (Python SDK - conda.yml)**: Create `conda.yml` with pip section, then register:
-      ```python
-      env = Environment(
-          name="bank-churn-env",
-          version="1",
-          conda_file="conda.yml",  # Contains pip section with requirements.txt
-          description="Environment for churn prediction pipeline"
-      )
-      ```
-    - **Option C (Azure CLI)**: `az ml environment create --file environment.yml`
-    - **Option D (Azure ML Studio)**: Create environment via UI from Dockerfile or conda file
-2.  **Verify environment registration**:
-    - **Azure CLI (recommended)**:
+1.  **Build Docker image locally**:
+    ```bash
+    # Build the Docker image
+    docker build -t bank-churn:latest .
+    
+    # Test the image locally (optional)
+    docker run --rm bank-churn:latest python -c "import pandas; print('OK')"
+    ```
+
+2.  **Push Docker image to Azure Container Registry (ACR)**:
+    ```bash
+    # Login to ACR (if not already logged in)
+    az acr login --name <your-acr-name>
+    
+    # Tag the image for ACR
+    docker tag bank-churn:latest <your-acr-name>.azurecr.io/bank-churn:latest
+    
+    # Push to ACR
+    docker push <your-acr-name>.azurecr.io/bank-churn:latest
+    
+    # Verify image is pushed (optional)
+    az acr repository show-tags --name <your-acr-name> --repository bank-churn
+    ```
+
+3.  **Register environment in Azure ML** pointing to the ACR image:
+    
+    Update the `aml/environments/environment.yml` file with your ACR name:
+    ```yaml
+    $schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
+    name: bank-churn-env
+    version: "1"
+    image: <your-acr-name>.azurecr.io/bank-churn:latest
+    description: Environment for churn prediction pipeline
+    ```
+    
+    Replace `<your-acr-name>` with your actual Azure Container Registry name, then register the environment using Azure CLI:
       ```bash
-      az ml environment show --name bank-churn-env --version 1
-      ```
-      The command returns JSON describing the environment, including `image`, `conda_file`, and metadata. A successful response confirms that the environment is registered.
-    - **Python SDK (optional)**:
-      ```python
-      env = ml_client.environments.get(name="bank-churn-env", version="1")
-      print(f"Environment: {env.name}:{env.version}")
-      print(f"Description: {env.description}")
-      print(f"Image: {env.image or 'None'}")
-      if env.build:
-          print(f"Build context: {env.build.path}, Dockerfile: {env.build.dockerfile_path}")
-      if env.conda_file:
-          print(f"Conda file: {env.conda_file}")
-      ```
-    - **Azure ML Studio**: Navigate to Environments -> `bank-churn-env:1` and confirm details in the UI
-3.  **Verify dependencies**: Ensure all dependencies from `requirements.txt` are available in the environment
-4.  **Note**: All components reference `azureml:bank-churn-env:1` for consistent dependencies
+    az ml environment create --file aml/environments/environment.yml \
+      --resource-group <resource-group> \
+      --workspace-name <workspace-name>
+    ```
+
+4.  **Verify environment registration**:
+    ```bash
+    az ml environment show --name bank-churn-env --version 1 \
+      --resource-group <resource-group> \
+      --workspace-name <workspace-name>
+    ```
+    The command returns JSON describing the environment, including `image` and metadata. A successful response confirms that the environment is registered.
+    
+    **Note**: All components reference `azureml:bank-churn-env:1` for consistent dependencies
 
 ### Step 13: Test Pipeline Execution
 
-1.  **Test data prep component**: Run data preprocessing pipeline
-2.  **Test training pipeline**: Run `run_pipeline.py` with sample data
-3.  **Test HPO pipeline**: Run `run_hpo.py` with small budget (e.g., 2-3 trials)
-4.  **Verify outputs**: Check MLflow runs, model artifacts, and metrics
+1.  **Test regular training pipeline**: 
+    ```bash
+    python run_pipeline.py
+    ```
+    - Uses data asset configured in `config.env` (`AZURE_RAW_DATA_ASSET` and `AZURE_RAW_DATA_VERSION`)
+    - Runs data prep → train pipeline using `train.yaml` component
+    - Trains models specified in `configs/train.yaml` → `training.models`
+    - Verify job submission in Azure ML Studio
+
+2.  **Test HPO pipeline** (optional, for hyperparameter optimization):
+    ```bash
+    python run_hpo.py
+    ```
+    - Uses data asset configured in `config.env`
+    - Runs data prep → HPO sweep using `hpo.yaml` component
+    - Configure budget in `configs/hpo.yaml` (e.g., `max_trials: 2-3` for testing)
+    - Verify sweep job submission in Azure ML Studio
+
+3.  **Verify outputs**:
+    - **Azure ML Studio**: Check job status, logs, and outputs
+    - **MLflow**: View runs, metrics, parameters, and artifacts (if MLflow tracking is configured)
+    - **Model artifacts**: Check that models are saved to outputs directory
 
 ---
 
@@ -203,25 +240,32 @@ docker run --rm -v "$PWD:/app" -w /app bank-churn:latest bash -lc "python -m src
 ### `run_hpo.py` - Hyperparameter Optimization
 
 - Runs HyperDrive sweep to find best hyperparameters
-- Each trial trains one model type (logreg, rf, or xgboost) with its hyperparameters
-- Efficient: 1 model per trial (3x reduction in compute cost)
+- Uses `aml/components/hpo.yaml` component for training
+- Loads HPO configuration from `configs/hpo.yaml`
+- Each trial trains one model type (from search space) with sampled hyperparameters
+- Efficient: 1 model per trial (reduces compute cost)
+- Automatically loads `config.env` for Azure ML configuration
 - **Use when**: First-time optimization, exploring new search spaces
-- **Outputs**: Best hyperparameters and model type from sweep results
+- **Outputs**: Best hyperparameters and model type from sweep results (logged to MLflow)
 
 ### `run_pipeline.py` - Fixed-Hyperparameter Training
 
-- Trains models with known good hyperparameters from `configs/train.yaml`
+- Uses `aml/components/train.yaml` component for training
+- Trains models specified in `configs/train.yaml` → `training.models`
+- Uses hyperparameters from `configs/train.yaml` → `training.hyperparameters`
 - Fast execution (no sweep overhead)
 - Simple pipeline: data_prep → train
+- Automatically loads `config.env` for Azure ML configuration
 - **Use when**: Quick retraining, production deployments, after HPO
 - **Outputs**: Trained model artifacts and MLflow run ID
 
 ### Typical Workflow
 
-1. Run `run_hpo.py` to find best hyperparameters
-2. Extract best hyperparameters and update config: `src/extract_best_params.py`
-3. Update `configs/train.yaml` with best hyperparameters
-4. Run `run_pipeline.py` for quick training with optimized hyperparameters
+1. Run `run_hpo.py` to find best hyperparameters (uses `hpo.yaml` component)
+2. Extract best hyperparameters and update config: `python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>`
+   - This automatically updates `configs/train.yaml` with best model and hyperparameters
+   - Sets `models: [best_model]` to train only the best model
+3. Run `run_pipeline.py` for quick training with optimized hyperparameters (uses `train.yaml` component)
 
 ---
 
@@ -246,9 +290,12 @@ docker run --rm -v "$PWD:/app" -w /app bank-churn:latest bash -lc "python -m src
 ### Model Training & Logging
 
 - Three models supported: Logistic Regression (`logreg`), Random Forest (`rf`), XGBoost (`xgboost`)
-- Models logged with `mlflow.sklearn.log_model()` including `pip_requirements`, `signature`, `input_example`
+- **Model Selection**: 
+  - Regular mode: Models determined from `configs/train.yaml` → `training.models`
+  - HPO mode: Single model type specified via `--model-type` CLI argument
+- Models saved as pickle files in Azure ML (automatically captured as artifacts)
+- Models logged to MLflow with metrics, parameters, and tags
 - Models support MLflow pyfunc deployment (no custom scoring script needed)
-- `predict_probabilities()` raises explicit error if model lacks `predict_proba` (no misleading fallbacks)
 
 ### Deployment Strategy
 

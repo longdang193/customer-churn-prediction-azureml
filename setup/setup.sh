@@ -7,9 +7,7 @@ set -e
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-churn-ml-project}"
 LOCATION="${AZURE_LOCATION:-southeastasia}"
 WORKSPACE_NAME="${AZURE_WORKSPACE_NAME:-churn-ml-workspace}"
-COMPUTE_INSTANCE_NAME="${AZURE_COMPUTE_INSTANCE_NAME:-churn-compute-inst}"
 COMPUTE_CLUSTER_NAME="${AZURE_COMPUTE_CLUSTER_NAME:-cpu-cluster}"
-COMPUTE_INSTANCE_SIZE="${COMPUTE_INSTANCE_SIZE:-Standard_DS2_v2}"
 COMPUTE_CLUSTER_SIZE="${COMPUTE_CLUSTER_SIZE:-Standard_DS2_v2}"
 MIN_NODES="${MIN_NODES:-0}"
 MAX_NODES="${MAX_NODES:-2}"
@@ -60,17 +58,6 @@ create_workspace() {
     fi
 }
 
-create_compute_instance() {
-    print_info "Creating compute instance: $COMPUTE_INSTANCE_NAME"
-    if az ml compute show --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" --name "$COMPUTE_INSTANCE_NAME" &> /dev/null; then
-        print_warning "Compute instance already exists"
-        return
-    fi
-    az ml compute create --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" \
-        --name "$COMPUTE_INSTANCE_NAME" --type ComputeInstance --size "$COMPUTE_INSTANCE_SIZE"
-    print_warning "Compute instance creation takes 5-10 minutes. Check status in Azure ML Studio."
-}
-
 create_compute_cluster() {
     print_info "Creating compute cluster: $COMPUTE_CLUSTER_NAME"
     if az ml compute show --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" --name "$COMPUTE_CLUSTER_NAME" &> /dev/null; then
@@ -88,7 +75,6 @@ display_info() {
     echo "Resource Group: $RESOURCE_GROUP"
     echo "Workspace: $WORKSPACE_NAME"
     echo "Location: $LOCATION"
-    echo "Compute Instance: $COMPUTE_INSTANCE_NAME"
     echo "Compute Cluster: $COMPUTE_CLUSTER_NAME ($MIN_NODES-$MAX_NODES nodes)"
     echo ""
     echo "Next: Access https://ml.azure.com and navigate to workspace: $WORKSPACE_NAME"
@@ -100,7 +86,6 @@ main() {
     check_azure_login
     create_resource_group
     create_workspace
-    create_compute_instance
     create_compute_cluster
     echo ""
     display_info

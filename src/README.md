@@ -8,12 +8,13 @@ End-to-end churn ML pipeline: data prep → training. All stages can be driven b
 
 ```bash
 # 1) Ensure config.env is configured with Azure ML settings
-set -a && source config.env && set +a
+# Note: Scripts now load config.env automatically, but you can also source it manually:
+# set -a && source config.env && set +a
 
-# 2) Submit the regular training pipeline
+# 2) Submit the regular training pipeline (uses train.yaml component)
 python run_pipeline.py
 
-# 3) Submit the HyperDrive sweep (HPO)
+# 3) Submit the HyperDrive sweep (HPO) (uses hpo.yaml component)
 python run_hpo.py
 
 # 4) After HPO completes, extract best hyperparameters and update config
@@ -35,9 +36,10 @@ The project supports three models:
 - **XGBoost** (`xgboost`) - Gradient boosting model
 
 **Model Selection:**
-- During HPO, each trial trains one model type with sampled hyperparameters
+- **Regular mode**: Models to train are specified in `configs/train.yaml` under the `models` key (e.g., `models: [logreg, rf]`)
+- **HPO mode**: Each trial trains one model type (specified via `--model-type`) with sampled hyperparameters
 - The best model (highest F1 score) is selected and logged as `model_type` tag in MLflow
-- After HPO, only the best model is trained with optimized hyperparameters
+- After HPO, `extract_best_params.py` updates `configs/train.yaml` to train only the best model
 
 ## Pipeline Overview
 
@@ -45,12 +47,18 @@ The project supports three models:
 
 ```
 Azure data asset (e.g. churn-data:3)
-  └─► run_pipeline.py / run_hpo.py
+  └─► run_pipeline.py (regular training)
          ├─► data_prep component → processed dataset (uri_folder output)
-         └─► train component → trains models, logs to MLflow
+         └─► train component (train.yaml) → trains models from config, logs to MLflow
                 ├─► In Azure ML: saves models as pickle files to outputs directory
-                ├─► Logs metrics, params, and tags to MLflow
-                └─► HyperDrive sweep (run_hpo.py): multiple trials, picks best based on configs/hpo.yaml
+                └─► Logs metrics, params, and tags to MLflow
+
+  └─► run_hpo.py (HPO sweep)
+         ├─► data_prep component → processed dataset (uri_folder output)
+         └─► train component (hpo.yaml) → sweep with multiple trials
+                ├─► Each trial trains one model type with sampled hyperparameters
+                ├─► Logs all trials to MLflow
+                └─► Picks best based on configs/hpo.yaml
 
 After HPO:
   └─► extract_best_params.py → extracts best hyperparameters and updates configs/train.yaml
@@ -97,28 +105,30 @@ python src/data_prep.py --output data/processed_custom --random-state 1337
 
 ### `train.py` — train and log models
 
-- Trains one or more models (`logreg`, `rf`, `xgboost`), optional SMOTE on the **train** split, logs params/metrics/artifacts to MLflow.
+- Trains models specified in `configs/train.yaml` (regular mode) or a single model type (HPO mode), optional SMOTE on the **train** split, logs params/metrics/artifacts to MLflow.
+- **Model Selection**: In regular mode, models are determined from `configs/train.yaml` → `training.models`. In HPO mode, use `--model-type` to specify a single model.
 - **Azure ML Compatibility**: When running in Azure ML, nested runs are automatically disabled and models are saved as pickle files to the outputs directory (Azure ML automatically captures these as artifacts). In local execution, nested runs are used as before.
-- Supports hyperparameter overrides via `--set model.param=value` (useful for manual tuning or integration with Azure ML HyperDrive).
-- **HPO Mode**: When `--model-type` and `--hyperparams-json` are provided, trains only the specified model with hyperparameters from the JSON file.
+- Supports hyperparameter overrides via `--set model.param=value` (useful for manual tuning or integration with Azure ML HyperDrive sweeps).
+- **HPO Mode**: When `--model-type` is provided, trains only the specified model. Hyperparameters are passed via `--set` flags (used by Azure ML HyperDrive sweeps).
 
 **Examples**
 
 ```bash
 # Use defaults from configs/train.yaml + configs/mlflow.yaml
+# Trains all models specified in configs/train.yaml → training.models
 python src/train.py
 
-# Train only RF and XGB
-python src/train.py --models rf xgboost --experiment-name churn-experiments
+# Train with custom experiment name
+python src/train.py --experiment-name churn-experiments
 
 # Enable SMOTE for imbalanced data
 python src/train.py --use-smote
 
-# Override hyperparameters manually
+# Override hyperparameters manually (applies to all models that have those params)
 python src/train.py --set rf.n_estimators=200 --set rf.max_depth=15
 
-# HPO mode: train single model with hyperparameters from JSON
-python src/train.py --model-type rf --hyperparams-json hyperparams.json
+# HPO mode: train single model with hyperparameters via --set flags
+python src/train.py --model-type rf --set rf.n_estimators=200 --set rf.max_depth=15
 ```
 
 > Implementation note: when `class_weight='balanced'` and SMOTE is **off**, XGBoost maps imbalance via `scale_pos_weight`.
@@ -171,7 +181,7 @@ The project includes an optional sweep job powered by Azure ML HyperDrive. The s
 
 ```bash
 # Ensure config.env is configured with Azure ML settings
-set -a && source config.env && set +a
+# Note: run_hpo.py now loads config.env automatically
 python run_hpo.py
 ```
 
@@ -199,10 +209,11 @@ The HPO behavior is controlled by `configs/hpo.yaml`:
 
 - `metric`: Primary metric to optimize (e.g., `f1`, `roc_auc`)
 - `mode`: Optimization direction (`max` or `min`)
+- `sampling_algorithm`: Sampling method (e.g., `random`, `grid`, `bayesian`)
 - `budget.max_trials`: Maximum number of trials to run
 - `budget.max_concurrent`: Maximum parallel trials
 - `early_stopping`: Configuration for early termination policies
-- `search_space`: Hyperparameter ranges per model (currently supports `rf`, `xgboost`)
+- `search_space`: Hyperparameter ranges per model (supports `rf`, `xgboost`, `logreg`)
 
 Results and individual trials can be inspected in Azure ML Studio using the URL printed after submission.
 
@@ -213,7 +224,8 @@ Results and individual trials can be inspected in Azure ML Studio using the URL 
 ### General Issues
 
 - **Missing parent run ID:** When extracting best parameters from HPO, ensure you use the correct parent run ID from the sweep job. Check Azure ML Studio for the sweep job run ID.
-- **No models trained:** Check training logs; if all models error, the run won't complete successfully.
+- **No models trained:** Check training logs; if all models error, the run won't complete successfully. Verify `configs/train.yaml` has `models` specified under `training` section.
+- **Model selection:** Models are determined from `configs/train.yaml` → `training.models` in regular mode. There is no `--models` CLI argument.
 - **Hyperparameter override syntax:** Use `--set model.param=value` format. For boolean values, use `true`/`false` (lowercase). For `None`, use `none` (lowercase). Numeric values are parsed automatically.
 
 ### Azure ML Specific Issues
@@ -224,6 +236,8 @@ Results and individual trials can be inspected in Azure ML Studio using the URL 
 
 - **Model loading errors:** When loading models in Azure ML, the script looks for models in the outputs directory (`AZUREML_ARTIFACTS_DIRECTORY` or `AZUREML_OUTPUT_DIRECTORY`). Ensure models were saved during training.
 
-- **Python version compatibility:** The project requires **Python 3.9** due to `azureml-core` compatibility. Ensure your Docker image uses Python 3.9.
+- **Python version compatibility:** The project requires **Python 3.9** due to `azureml-core` compatibility. Ensure your Docker image uses Python 3.9. Do not use Python 3.10+ union type syntax (`Type | None`); use `Optional[Type]` instead.
+
+- **Data asset configuration:** Both `run_pipeline.py` and `run_hpo.py` now automatically load `config.env`. Ensure `AZURE_RAW_DATA_ASSET` and `AZURE_RAW_DATA_VERSION` are set correctly in `config.env`.
 
 For more detailed troubleshooting information, see [`../docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md).

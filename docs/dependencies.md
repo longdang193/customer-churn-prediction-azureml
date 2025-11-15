@@ -32,14 +32,9 @@ python -m pip install -r requirements.txt
 python -m pip install -r dev-requirements.txt
 ```
 
-## Notes
+## Important Notes
 
-- Optional packages:
-  - `xgboost`, `mlflow`, `fastapi`, `uvicorn`, `azure-ai-ml`, `azure-identity`
-- Notebooks and evaluation plots require: `matplotlib`, `seaborn`, `scipy`
-- Configuration loader requires: `pyyaml`
-- Class-imbalance support requires: `imbalanced-learn`
-
-If you change `requirements.in` or `dev-requirements.in`, re-run `pip-compile` and commit the updated `*.txt` files.
+- All packages listed in `requirements.in` are runtime dependencies required for the project.
+- If you change `requirements.in` or `dev-requirements.in`, re-run `pip-compile` and commit the updated `*.txt` files.
 
 

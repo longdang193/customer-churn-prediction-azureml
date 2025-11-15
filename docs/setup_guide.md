@@ -44,28 +44,21 @@ AZURE_SUBSCRIPTION_ID="your-subscription-id"
 AZURE_TENANT_ID="your-tenant-id"
 AZURE_RESOURCE_GROUP="rg-churn-ml-project"
 AZURE_WORKSPACE_NAME="churn-ml-workspace"
-AZURE_STORAGE_ACCOUNT="yourstorageaccount"
-AZURE_STORAGE_CONTAINER="data"
 AZURE_RAW_DATA_ASSET="churn-data"
-AZURE_RAW_DATA_VERSION="1"
+AZURE_RAW_DATA_VERSION="3"
 ```
+
+**Important**: The data asset must be registered as `uri_folder` type (directory containing CSV file(s)). The `data_prep` component will automatically load all CSV files in the folder.
 
 The template also includes optional entries you can customize:
 - `AZURE_LOCATION`: Azure region for the workspace (e.g., `southeastasia`)
-- `AZURE_RAW_DATA_ASSET`, `AZURE_RAW_DATA_VERSION`: Default data asset name/version used by pipeline scripts
-- `AZURE_COMPUTE_INSTANCE_NAME`, `AZURE_COMPUTE_CLUSTER_NAME`: Names used when provisioning compute
-- `COMPUTE_INSTANCE_SIZE`, `COMPUTE_CLUSTER_SIZE`: VM sizes for compute resources
-- `DATA_ASSET_FULL`, `DATA_ASSET_SAMPLE`, `DATA_VERSION`: Data asset names and version tags
+- `AZURE_RAW_DATA_ASSET`, `AZURE_RAW_DATA_VERSION`: Data asset name/version used by pipeline scripts
+- `AZURE_COMPUTE_CLUSTER_NAME`: Name used when provisioning compute cluster
+- `COMPUTE_CLUSTER_SIZE`: VM size for compute cluster
 - `MODEL_NAME`, `EXPERIMENT_NAME`: MLflow experiment and registered model identifiers
 - `ENDPOINT_NAME`, `DEPLOYMENT_NAME`: Names used for online endpoint deployment
 
-After filling the placeholders, load the variables in your shell before running any setup scripts:
-
-```bash
-set -a
-source config.env
-set +a
-```
+**Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`, so you don't need to source it manually.
 
 ### 2. Authenticate with Azure
 
@@ -77,17 +70,21 @@ az login
 
 ### 3. Create Azure ML Data Asset
 
-If you have uploaded `churn.csv` to your Azure Blob Storage, you can create an Azure ML Data Asset.
+**Important**: The data asset must be registered as `uri_folder` type (directory containing CSV file(s)). The `data_prep` component will automatically load and concatenate all CSV files in the folder.
 
-**Option A: Python (Recommended)**
+Register the data asset using Azure CLI:
+
 ```bash
-python setup/create_data_asset.py
+az ml data upload \
+  --name churn-data \
+  --version 3 \
+  --path data/ \
+  --type uri_folder \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name>
 ```
 
-**Option B: Bash (Azure CLI)**
-```bash
-./setup/create_data_asset.sh
-```
+Replace `<resource-group>` and `<workspace-name>` with your values, or use the values from `config.env`.
 
-This allows you to reference the dataset in Azure ML pipelines as `azureml:bank-churn-raw:1`.
+**Note**: The data asset name and version should match `AZURE_RAW_DATA_ASSET` and `AZURE_RAW_DATA_VERSION` in your `config.env` file. The pipeline scripts will automatically use these values.
 

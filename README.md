@@ -25,7 +25,8 @@ This repo delivers a HyperDrive-first MLOps workflow for bank customer churn pre
 │   └── components/              # Azure ML component definitions
 │       ├── data_prep.yaml      # Data preprocessing component
 │       ├── extract_best_params.yaml  # Extract best params component
-│       └── train.yaml          # Training component
+│       ├── train.yaml          # Training component (regular training with fixed hyperparameters)
+│       └── hpo.yaml            # Training component (HPO sweeps with hyperparameter search)
 ├── configs/                     # Configuration files
 │   ├── data.yaml               # Data preparation settings
 │   ├── hpo.yaml                # Hyperparameter optimization (test/production)
@@ -86,7 +87,7 @@ pip install -r requirements.txt
 
 ### 2. Configure Azure ML
 
-Create a `config.env` file (or export the variables) with your workspace details:
+Create a `config.env` file with your workspace details:
 
 ```bash
 AZURE_SUBSCRIPTION_ID=<subscription>
@@ -98,7 +99,9 @@ AZURE_RAW_DATA_VERSION=<data-version>
 
 Authenticate with Azure (`az login`) before submitting jobs.
 
-**Note**: Data is loaded from Azure ML data assets. Configure the data asset name and version in `config.env`.
+**Note**: 
+- Data is loaded from Azure ML data assets. Configure the data asset name and version in `config.env`.
+- Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`, so you don't need to source it manually (though you can if you prefer).
 
 ### 3. Configuration Files
 
@@ -120,9 +123,10 @@ python run_hpo.py
 ```
 
 This will:
-- Run a HyperDrive sweep that trains all models (`rf`, `xgboost`) in each trial
-- Each trial trains one model type with sampled hyperparameters from `configs/hpo.yaml`
-- Selects the best trial based on F1 score
+- Run a HyperDrive sweep using the `hpo.yaml` component
+- Each trial trains one model type (from the search space in `configs/hpo.yaml`) with sampled hyperparameters
+- Models to optimize are specified in `configs/hpo.yaml` → `search_space` (e.g., `rf`, `xgboost`)
+- Selects the best trial based on the configured metric (default: F1 score)
 - Logs all trials to MLflow
 
 **After HPO completes:**
@@ -144,12 +148,13 @@ python run_pipeline.py
 
 This will:
 - Use the best model and hyperparameters from `configs/train.yaml` (updated in Step 1)
-- Run data prep → train pipeline
+- Run data prep → train pipeline using the `train.yaml` component
+- Train models specified in `configs/train.yaml` → `training.models` (should be only the best model after HPO)
 - Save the trained model as a pickle file
 - Fast single run (no HPO overhead)
 - Perfect for production retraining
 
-**Note**: The `train.yaml` config file should contain only the best model from HPO. The `extract_best_params.py` script automatically sets this.
+**Note**: The `train.yaml` config file should contain only the best model from HPO. The `extract_best_params.py` script automatically sets `models: [best_model]` in the config.
 
 ### 5. Configuration: Test vs Production
 
@@ -187,8 +192,10 @@ mlflow ui --backend-store-uri "${MLFLOW_TRACKING_URI}" --port 5000
 ## Running on Azure ML
 
 All pipelines load component specs from `aml/components/` and read configuration from:
-- `configs/hpo.yaml` for HPO sweeps
-- `configs/train.yaml` for training runs
+- **HPO Pipeline** (`run_hpo.py`): Uses `aml/components/hpo.yaml` component and `configs/hpo.yaml` for sweep configuration
+- **Regular Pipeline** (`run_pipeline.py`): Uses `aml/components/train.yaml` component and `configs/train.yaml` for training configuration
+
+Both pipelines automatically load `config.env` for Azure ML workspace and data asset configuration.
 
 ## Documentation
 
@@ -202,15 +209,17 @@ All pipelines load component specs from `aml/components/` and read configuration
 
 **HPO Workflow:**
 ```bash
-# 1. Run HPO
+# 1. Run HPO (uses hpo.yaml component)
 python run_hpo.py
 
 # 2. Extract best params and update config (after HPO completes)
 python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
 
-# 3. Train best model
+# 3. Train best model (uses train.yaml component)
 python run_pipeline.py
 ```
+
+**Note**: Both scripts automatically load `config.env` for Azure ML configuration. No need to source it manually.
 
 **Optional flags for `extract_best_params.py`:**
 - `--output <file>` – Save params to JSON file (optional)

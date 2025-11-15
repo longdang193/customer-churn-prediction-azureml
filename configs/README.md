@@ -33,13 +33,18 @@ Override the default config file using `--config`, or override specific paramete
 # Use a custom training configuration
 python src/train.py --config configs/train_custom.yaml
 
-# Override models to train
-python src/train.py --models rf
+# Models are determined from configs/train.yaml
+python src/train.py
 ```
 
 ### Configuration Precedence
 
-1. **CLI Arguments** (highest priority)
+For models selection:
+- **Regular mode**: Uses `configs/train.yaml` → `training.models`
+- **HPO mode**: Uses `--model-type` argument (from Azure ML sweep)
+
+For other settings (hyperparameters, class_weight, etc.):
+1. **CLI Arguments** (highest priority, e.g., `--set`, `--class-weight`)
 2. **Config File Values**
 3. **Script Defaults** (lowest priority)
 

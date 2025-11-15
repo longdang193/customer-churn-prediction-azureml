@@ -5,9 +5,7 @@ $ErrorActionPreference = "Stop"
 $ResourceGroup = if ($env:AZURE_RESOURCE_GROUP) { $env:AZURE_RESOURCE_GROUP } else { "rg-churn-ml-project" }
 $Location = if ($env:AZURE_LOCATION) { $env:AZURE_LOCATION } else { "southeastasia" }
 $WorkspaceName = if ($env:AZURE_WORKSPACE_NAME) { $env:AZURE_WORKSPACE_NAME } else { "churn-ml-workspace" }
-$ComputeInstanceName = if ($env:AZURE_COMPUTE_INSTANCE_NAME) { $env:AZURE_COMPUTE_INSTANCE_NAME } else { "churn-compute-inst" }
 $ComputeClusterName = if ($env:AZURE_COMPUTE_CLUSTER_NAME) { $env:AZURE_COMPUTE_CLUSTER_NAME } else { "cpu-cluster" }
-$ComputeInstanceSize = if ($env:COMPUTE_INSTANCE_SIZE) { $env:COMPUTE_INSTANCE_SIZE } else { "Standard_DS2_v2" }
 $ComputeClusterSize = if ($env:COMPUTE_CLUSTER_SIZE) { $env:COMPUTE_CLUSTER_SIZE } else { "Standard_DS2_v2" }
 $MinNodes = if ($env:MIN_NODES) { [int]$env:MIN_NODES } else { 0 }
 $MaxNodes = if ($env:MAX_NODES) { [int]$env:MAX_NODES } else { 2 }
@@ -66,18 +64,6 @@ function New-Workspace {
     }
 }
 
-function New-ComputeInstance {
-    Write-Info "Creating compute instance: $ComputeInstanceName"
-    $null = az ml compute show --resource-group $ResourceGroup --workspace-name $WorkspaceName --name $ComputeInstanceName 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Warning-Custom "Compute instance already exists"
-        return
-    }
-    az ml compute create --resource-group $ResourceGroup --workspace-name $WorkspaceName `
-        --name $ComputeInstanceName --type ComputeInstance --size $ComputeInstanceSize
-    Write-Warning-Custom "Compute instance creation takes 5-10 minutes. Check status in Azure ML Studio."
-}
-
 function New-ComputeCluster {
     Write-Info "Creating compute cluster: $ComputeClusterName"
     $null = az ml compute show --resource-group $ResourceGroup --workspace-name $WorkspaceName --name $ComputeClusterName 2>&1
@@ -96,7 +82,6 @@ function Show-Info {
     Write-Host "Resource Group: $ResourceGroup"
     Write-Host "Workspace: $WorkspaceName"
     Write-Host "Location: $Location"
-    Write-Host "Compute Instance: $ComputeInstanceName"
     Write-Host "Compute Cluster: $ComputeClusterName ($MinNodes-$MaxNodes nodes)"
     Write-Host ""
     Write-Host "Next: Access https://ml.azure.com and navigate to workspace: $WorkspaceName"
@@ -108,7 +93,6 @@ function Main {
     Test-AzureLogin
     New-ResourceGroup
     New-Workspace
-    New-ComputeInstance
     New-ComputeCluster
     Write-Host ""
     Show-Info

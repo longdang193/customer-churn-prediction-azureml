@@ -5,10 +5,11 @@ This guide walks through the churn pipeline when driven entirely by Azure ML Hyp
 ## 1. Data Preparation (`src/data_prep.py`)
 
 Used in two contexts:
-- **Azure ML component** (`aml/components/data_prep.yaml`) – runs once per sweep to materialise processed data in the workspace.
-- **Local parity** – optional local execution keeps evaluation/scoring aligned with the sweep output.
+- **Azure ML component** (`aml/components/data_prep.yaml`) – runs once per pipeline to materialize processed data in the workspace.
+- **Local parity** – optional local execution keeps evaluation/scoring aligned with the pipeline output.
 
 Key behaviours:
+- Accepts `uri_folder` input (directory containing CSV file(s)) and automatically loads all CSV files in the folder
 - Drops ID columns (`RowNumber`, `CustomerId`, `Surname`).
 - Label-encodes categorical features and persists encoders.
 - Scales numeric columns via `StandardScaler` (fit on train, transform on test).
@@ -19,28 +20,33 @@ Usage (local parity):
 python src/data_prep.py --config configs/data.yaml --output data/processed
 ```
 
-## 2. HyperDrive Sweep (`run_hpo.py` + `aml/components/train.yaml`)
+## 2. HyperDrive Sweep (`run_hpo.py` + `aml/components/hpo.yaml`)
 
 `run_hpo.py` is the primary entry point. It:
-1. Loads Azure ML credentials (see `config.env`).
+1. Automatically loads Azure ML configuration from `config.env`.
 2. Reads the HyperDrive configuration from `configs/hpo.yaml` (metric, mode, budget, search space, early stopping).
 3. Builds a DSL pipeline:
    - `data_prep` component → processed dataset (uri_folder output).
-   - `train` component launched with `.sweep(...)` so HyperDrive explores the search space.
+   - `train` component (using `aml/components/hpo.yaml`) launched with `.sweep(...)` so HyperDrive explores the search space.
 4. Submits the job and prints the Studio URL.
 
-`aml/components/train.yaml` maps the search space to CLI overrides on `train.py`:
+`aml/components/hpo.yaml` maps the search space to CLI overrides on `train.py`:
 ```yaml
 command: >-
-  python train.py   --data ${{inputs.processed_data}}   --model-artifact-dir ${{outputs.model_output}}   --parent-run-id-output ${{outputs.parent_run_id}}   $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
+  python train.py
+  --data ${{inputs.processed_data}}
+  --model-artifact-dir ${{outputs.model_output}}
+  --parent-run-id-output ${{outputs.parent_run_id}}
+  --model-type ${{inputs.model_type}}
+  $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
   ...
 ```
 
 Each trial:
+- Trains one model type (from search space) with sampled hyperparameters.
 - Applies the proposed hyperparameters via `--set model.param=value`.
-- Trains the configured models (typically Random Forest for the sweep) and logs nested MLflow runs.
-- Tags the parent run with `best_model` and `best_model_run_id`.
-- Emits artifacts to the component output (`model_output`) and logs metrics like `best_model_f1`.
+- Logs metrics, parameters, and tags to MLflow (uses active run, no nested runs in Azure ML).
+- Saves model artifacts to the component output (`model_output`).
 
 HyperDrive picks the best trial based on the configured metric.
 
@@ -66,8 +72,8 @@ This script:
 - `search_space` – candidate values per model (Random Forest, XGBoost, etc.).
 
 **`configs/train.yaml`** contains:
-- `models` – list of models to train (should be only the best model after HPO)
-- `hyperparameters` – hyperparameters for each model (updated with best values after HPO)
+- `training.models` – list of models to train (should be only the best model after HPO)
+- `training.hyperparameters` – hyperparameters for each model (updated with best values after HPO)
 
 `run_hpo.py` converts the search space lists into Azure ML `Choice` distributions.
 

@@ -4,13 +4,15 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from dotenv import load_dotenv
 from azure.ai.ml import MLClient, dsl, Input
 from azure.ai.ml.entities import Job
 from azure.ai.ml.sweep import MedianStoppingPolicy
 from azure.identity import DefaultAzureCredential
 
 from hpo_utils import build_parameter_space, load_hpo_config
-from run_pipeline import load_azure_config, load_pipeline_components
+from run_pipeline import load_azure_config
+from azure.ai.ml import load_component
 
 DEFAULT_COMPUTE = "cpu-cluster"
 DEFAULT_DATA_ASSET = "bank-churn-raw"
@@ -57,6 +59,9 @@ def create_hpo_pipeline(components: Dict[str, Any], hpo_cfg: Dict[str, Any]):
 
 def main() -> None:
     """Main entry point for HPO pipeline."""
+    # Load environment variables from config.env
+    load_dotenv("config.env")
+    
     config = load_azure_config()
     ml_client = MLClient(
         DefaultAzureCredential(),
@@ -64,7 +69,12 @@ def main() -> None:
         resource_group_name=config["resource_group"],
         workspace_name=config["workspace_name"],
     )
-    components = load_pipeline_components(Path("aml/components"))
+    components_dir = Path("aml/components")
+    # Load components: data_prep from regular pipeline, train from HPO component
+    components = {
+        "data_prep": load_component(source=str(components_dir / "data_prep.yaml")),
+        "train": load_component(source=str(components_dir / "hpo.yaml")),
+    }
     hpo_cfg = load_hpo_config()
     pipeline = create_hpo_pipeline(components, hpo_cfg)
 
@@ -72,7 +82,7 @@ def main() -> None:
     data_asset_version = os.getenv("AZURE_RAW_DATA_VERSION", "1")
 
     pipeline_input = Input(
-        type="uri_file",
+        type="uri_folder",
         path=f"azureml:{data_asset_name}:{data_asset_version}",
         mode="mount",
     )

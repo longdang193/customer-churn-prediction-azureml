@@ -1,19 +1,23 @@
-# Core runtime dependencies (kept light)
+# Core runtime dependencies
 pandas
 numpy
 scikit-learn
 imbalanced-learn
 pyyaml
-matplotlib
-seaborn
-scipy
 
-# Optional additions (enabled per request)
-xgboost           # enable XGBoost model
+# Model libraries
+xgboost           # XGBoost model support
+
+# MLflow tracking
 mlflow            # experiment tracking
 azureml-mlflow    # Azure ML MLflow integration
+
+# Azure ML SDK
 azure-ai-ml       # Azure ML SDK
 azure-identity    # Azure identity for SDK
+
+# Environment configuration
+python-dotenv     # Load environment variables from config.env
+
+# Other dependencies
 fastapi           # serving API
-
-

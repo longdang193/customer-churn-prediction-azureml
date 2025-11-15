@@ -11,7 +11,7 @@ from azure.ai.ml import MLClient, dsl, load_component, Input
 
 def load_azure_config() -> Dict[str, Any]:
     """Load Azure ML configuration from environment variables."""
-    load_dotenv()
+    load_dotenv("config.env")
 
     config = {
         "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID"),
@@ -55,6 +55,9 @@ def define_pipeline(components: Dict[str, Any]):
 
 def main():
     """Main function to define and run the Azure ML pipeline."""
+    # Load environment variables from config.env
+    load_dotenv("config.env")
+    
     config = load_azure_config()
 
     ml_client = MLClient(
@@ -69,7 +72,7 @@ def main():
     data_asset_name = os.getenv("AZURE_RAW_DATA_ASSET", "bank-churn-raw")
     data_asset_version = os.getenv("AZURE_RAW_DATA_VERSION", "1")
     pipeline_input = Input(
-        type="uri_file",
+        type="uri_folder",
         path=f"azureml:{data_asset_name}:{data_asset_version}",
         mode="mount",
     )

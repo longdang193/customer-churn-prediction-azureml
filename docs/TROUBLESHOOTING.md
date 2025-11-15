@@ -25,6 +25,11 @@ This document contains important considerations and troubleshooting information 
 - **Solution**: Dockerfile uses `python:3.9-slim` as base image
 - **Note**: Requirements files (`requirements.txt` and `dev-requirements.txt`) must be compiled with Python 3.9
 
+**Type Hint Compatibility**: 
+- **Do NOT use** Python 3.10+ union syntax: `Type | None` (causes `TypeError`)
+- **Use** Python 3.9 compatible syntax: `Optional[Type]` from `typing` module
+- The `tuple[...]` syntax is valid in Python 3.9, only the `|` union operator requires Python 3.10+
+
 **To recompile requirements**:
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace python:3.9-slim bash -c \
@@ -174,37 +179,47 @@ else:
 
 **Always rebuild after dependency changes**:
 ```bash
-docker build -t acrbankchurn.azurecr.io/bank-churn:latest .
-docker push acrbankchurn.azurecr.io/bank-churn:latest
+# Build the Docker image locally
+docker build -t bank-churn:latest .
+
+# Tag for ACR
+docker tag bank-churn:latest <your-acr-name>.azurecr.io/bank-churn:latest
+
+# Push to ACR
+docker push <your-acr-name>.azurecr.io/bank-churn:latest
 ```
 
 **Verify image is pushed**:
 ```bash
-az acr repository show-tags --name acrbankchurn --repository bank-churn
+az acr repository show-tags --name <your-acr-name> --repository bank-churn
 ```
 
 ### Environment Registration
 
-The Docker image should be registered as an Azure ML environment. Options:
+The Docker image should be registered as an Azure ML environment using Azure CLI:
 
-1. **Python SDK** (recommended):
-   ```python
-   from azure.ai.ml.entities import Environment, BuildContext
-   
-   env = Environment(
-       name="bank-churn-env",
-       build=BuildContext(path="."),
-       conda_file=None,  # Using Dockerfile
-   )
-   ml_client.environments.create_or_update(env)
+1. **Update `aml/environments/environment.yml`** with your ACR name:
+   ```yaml
+   $schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
+   name: bank-churn-env
+   version: "1"
+   image: <your-acr-name>.azurecr.io/bank-churn:latest
+   description: Environment for churn prediction pipeline
    ```
 
-2. **Azure CLI**:
+2. **Register the environment**:
    ```bash
-   az ml environment create --file aml/environments/bank-churn-env.yaml
+   az ml environment create --file aml/environments/environment.yml \
+     --resource-group <resource-group> \
+     --workspace-name <workspace-name>
    ```
 
-3. **Azure ML Studio**: Upload Dockerfile and register environment
+3. **Verify registration**:
+   ```bash
+   az ml environment show --name bank-churn-env --version 1 \
+     --resource-group <resource-group> \
+     --workspace-name <workspace-name>
+   ```
 
 ---
 
@@ -214,20 +229,22 @@ The Docker image should be registered as an Azure ML environment. Options:
 
 **Issue**: Pipeline fails with `ResourceNotFoundError` for data asset
 
-**Solution**: Ensure data asset is registered:
+**Solution**: Ensure data asset is registered as `uri_folder` type:
 ```bash
 # List existing data assets
 az ml data list --resource-group <rg> --workspace-name <ws>
 
-# Upload and register data
+# Upload and register data as uri_folder (directory containing CSV file(s))
 az ml data upload \
   --name churn-data \
   --version 3 \
-  --path data/churn.csv \
-  --type uri_file \
+  --path data/ \
+  --type uri_folder \
   --resource-group <rg> \
   --workspace-name <ws>
 ```
+
+**Note**: The data asset must be registered as `uri_folder` type. The `data_prep` component expects a folder input and will automatically load all CSV files in the folder.
 
 **Update config.env**:
 ```bash
@@ -247,6 +264,20 @@ AZURE_RAW_DATA_VERSION="3"
 1. Verify managed identity has `Storage Blob Data Reader` role on storage account
 2. Recycle compute node after granting permissions
 3. Re-upload data to ensure it's accessible
+
+### Data Asset Configuration Loading
+
+**Issue**: Pipeline fails with `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1` even though `config.env` specifies a different data asset
+
+**Cause**: Pipeline scripts not loading `config.env` explicitly, falling back to hardcoded defaults
+
+**Solution**: Both `run_pipeline.py` and `run_hpo.py` now automatically load `config.env`. Ensure your `config.env` file has:
+```bash
+AZURE_RAW_DATA_ASSET="churn-data"
+AZURE_RAW_DATA_VERSION="3"
+```
+
+**Note**: The scripts will fall back to defaults (`bank-churn-raw` version 1) if `config.env` is not found or variables are not set. See the "Common Errors and Solutions" section below for detailed troubleshooting.
 
 ---
 
@@ -420,6 +451,53 @@ az ml compute update --name cpu-cluster --set max_instances=2
 - Ensure error handling doesn't prevent valid trials from running
 - Test with a single model type first before running full HPO sweep
 
+### Error: `TypeError: unsupported operand type(s) for |: '_GenericAlias' and 'NoneType'`
+
+**Cause**: Code uses Python 3.10+ union type syntax (`JSONDict | None`) but the project requires Python 3.9
+
+**Error Location**: 
+- `src/training/model_utils.py`: `def apply_hyperparameters(model: Any, hyperparams: JSONDict | None)`
+- `src/training/training.py`: `model_hyperparams: JSONDict | None = None`
+
+**Solution**: Replace `|` union syntax with `Optional` from `typing` module:
+- Change `JSONDict | None` to `Optional[JSONDict]`
+- Ensure `Optional` is imported: `from typing import Optional`
+
+**Fixed Files**:
+- `src/training/model_utils.py`: Line 36
+- `src/training/training.py`: Line 53
+
+**Note**: The `tuple[...]` syntax is valid in Python 3.9, only the `|` union operator requires Python 3.10+.
+
+### Error: `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1`
+
+**Cause**: Data asset not found or incorrect configuration in `config.env`
+
+**Solution**: 
+1. Verify `config.env` exists and contains correct values:
+   ```bash
+   AZURE_RAW_DATA_ASSET="churn-data"
+   AZURE_RAW_DATA_VERSION="3"
+   ```
+
+2. Verify the data asset exists and is registered as `uri_folder` type:
+   ```bash
+   az ml data show --name churn-data --version 3 --resource-group <rg> --workspace-name <ws>
+   ```
+
+3. If the data asset doesn't exist, register it:
+   ```bash
+   az ml data upload \
+     --name churn-data \
+     --version 3 \
+     --path data/ \
+     --type uri_folder \
+     --resource-group <rg> \
+     --workspace-name <ws>
+   ```
+
+**Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`. If the file is missing or variables are not set, they will fall back to defaults (`bank-churn-raw` version 1).
+
 ---
 
 ## Best Practices
@@ -428,7 +506,8 @@ az ml compute update --name cpu-cluster --set max_instances=2
 
 Before running on Azure ML, test the training script locally:
 ```bash
-python src/train.py --data-dir data/processed --models logreg --experiment-name test
+python src/train.py --data data/processed --experiment-name test
+# Models are determined from configs/train.yaml
 ```
 
 ### 2. Monitor Pipeline Jobs
@@ -482,19 +561,30 @@ print(mlflow.active_run())
 
 ### Rebuild Docker Image
 ```bash
-docker build -t acrbankchurn.azurecr.io/bank-churn:latest .
-docker push acrbankchurn.azurecr.io/bank-churn:latest
+# Build locally
+docker build -t bank-churn:latest .
+
+# Tag and push to ACR
+docker tag bank-churn:latest <your-acr-name>.azurecr.io/bank-churn:latest
+docker push <your-acr-name>.azurecr.io/bank-churn:latest
+
+# Update environment.yml with new image tag if needed, then re-register
+az ml environment create --file aml/environments/environment.yml \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name>
 ```
 
 ### Run Regular Pipeline
 ```bash
-set -a && source config.env && set +a && python run_pipeline.py
+python run_pipeline.py
 ```
+**Note**: The script automatically loads `config.env` for Azure ML configuration.
 
 ### Run HPO Pipeline
 ```bash
-set -a && source config.env && set +a && python run_hpo.py
+python run_hpo.py
 ```
+**Note**: The script automatically loads `config.env` for Azure ML configuration.
 
 ### Check Job Status
 ```bash
@@ -524,4 +614,11 @@ az ml job download --name <job-name> --resource-group <rg> --workspace-name <ws>
 
 **Last Updated**: 2025-01-13
 **Maintained By**: MLOps Team
+
+---
+
+## Recent Fixes (2025-01-13)
+
+1. **Data Asset Configuration**: Fixed `run_pipeline.py` and `run_hpo.py` to explicitly load `config.env` instead of relying on default `.env` file
+2. **Python 3.9 Type Hints**: Replaced `|` union syntax with `Optional[...]` for Python 3.9 compatibility in `model_utils.py` and `training.py`
 

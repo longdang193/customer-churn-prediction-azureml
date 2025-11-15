@@ -6,45 +6,6 @@ type: command
 inputs:
   processed_data:
     type: uri_folder
-  model_type:
-    type: string
-    optional: true
-  rf_max_depth:
-    type: integer
-    optional: true
-  rf_n_estimators:
-    type: integer
-    optional: true
-  rf_min_samples_split:
-    type: integer
-    optional: true
-  rf_min_samples_leaf:
-    type: integer
-    optional: true
-  logreg_C:
-    type: number
-    optional: true
-  logreg_solver:
-    type: string
-    optional: true
-  xgboost_n_estimators:
-    type: integer
-    optional: true
-  xgboost_max_depth:
-    type: integer
-    optional: true
-  xgboost_learning_rate:
-    type: number
-    optional: true
-  xgboost_subsample:
-    type: number
-    optional: true
-  xgboost_colsample_bytree:
-    type: number
-    optional: true
-  hyperparams_json:
-    type: uri_file
-    optional: true
 
 outputs:
   model_output:
@@ -61,17 +22,3 @@ command: >-
   --data ${{inputs.processed_data}}
   --model-artifact-dir ${{outputs.model_output}}
   --parent-run-id-output ${{outputs.parent_run_id}}
-  $[[--model-type ${{inputs.model_type}}]]
-  $[[--hyperparams-json ${{inputs.hyperparams_json}}]]
-  $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
-  $[[--set rf.n_estimators=${{inputs.rf_n_estimators}}]]
-  $[[--set rf.min_samples_split=${{inputs.rf_min_samples_split}}]]
-  $[[--set rf.min_samples_leaf=${{inputs.rf_min_samples_leaf}}]]
-  $[[--set logreg.C=${{inputs.logreg_C}}]]
-  $[[--set logreg.solver=${{inputs.logreg_solver}}]]
-  $[[--set xgboost.n_estimators=${{inputs.xgboost_n_estimators}}]]
-  $[[--set xgboost.max_depth=${{inputs.xgboost_max_depth}}]]
-  $[[--set xgboost.learning_rate=${{inputs.xgboost_learning_rate}}]]
-  $[[--set xgboost.subsample=${{inputs.xgboost_subsample}}]]
-  $[[--set xgboost.colsample_bytree=${{inputs.xgboost_colsample_bytree}}]]
-

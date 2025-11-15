@@ -5,6 +5,11 @@ ruff
 isort
 pre-commit
 
+# Notebook dependencies (for EDA)
+matplotlib
+seaborn
+scipy
+
 
 
 
