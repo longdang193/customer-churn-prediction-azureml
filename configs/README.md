@@ -40,10 +40,12 @@ python src/train.py
 ### Configuration Precedence
 
 For models selection:
+
 - **Regular mode**: Uses `configs/train.yaml` → `training.models`
 - **HPO mode**: Uses `--model-type` argument (from Azure ML sweep)
 
 For other settings (hyperparameters, class_weight, etc.):
+
 1. **CLI Arguments** (highest priority, e.g., `--set`, `--class-weight`)
 2. **Config File Values**
 3. **Script Defaults** (lowest priority)

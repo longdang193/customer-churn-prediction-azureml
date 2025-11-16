@@ -1,6 +1,5 @@
 """HPO pipeline for hyperparameter optimization."""
 
-import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -11,11 +10,10 @@ from azure.ai.ml.sweep import MedianStoppingPolicy
 from azure.identity import DefaultAzureCredential
 
 from hpo_utils import build_parameter_space, load_hpo_config
-from run_pipeline import load_azure_config
+from src.utils import load_azure_config, get_data_asset_config
 from azure.ai.ml import load_component
 
 DEFAULT_COMPUTE = "cpu-cluster"
-DEFAULT_DATA_ASSET = "bank-churn-raw"
 
 
 def create_hpo_pipeline(components: Dict[str, Any], hpo_cfg: Dict[str, Any]):
@@ -78,8 +76,10 @@ def main() -> None:
     hpo_cfg = load_hpo_config()
     pipeline = create_hpo_pipeline(components, hpo_cfg)
 
-    data_asset_name = os.getenv("AZURE_RAW_DATA_ASSET", DEFAULT_DATA_ASSET)
-    data_asset_version = os.getenv("AZURE_RAW_DATA_VERSION", "1")
+    # Get data asset configuration
+    data_asset_config = get_data_asset_config()
+    data_asset_name = data_asset_config["data_asset_name"]
+    data_asset_version = data_asset_config["data_asset_version"]
 
     pipeline_input = Input(
         type="uri_folder",

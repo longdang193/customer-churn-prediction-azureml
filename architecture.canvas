@@ -59,9 +59,9 @@
       "id": "8bf35183-5160-4863-8c76-016c8cb4ec16",
       "x": -268.45732207206765,
       "y": 1560.7866187876202,
-      "width": 400.9604953266477,
-      "height": 178.3784409262712,
-      "text": "utils/ Package\n\n- config_loader.py: Config loading/parsing\n- config_utils.py: Config parsing utilities\n- mlflow_utils.py: MLflow tracking\n- metrics.py: Metrics calculation"
+      "width": 420.82854964426724,
+      "height": 390.30435364754635,
+      "text": "utils/ Package\n\nCore Utilities:\n- config_loader.py: YAML config loading\n- env_loader.py: Environment variable loading\n- path_utils.py: Path resolution\n- type_utils.py: Type conversion\n\nDomain-Specific:\n- azure_config.py: Azure ML configuration\n- config_utils.py: Data prep configuration\n- mlflow_utils.py: MLflow run management\n- metrics.py: Model evaluation metrics"
     },
     {
       "type": "text",
@@ -84,8 +84,8 @@
     {
       "type": "text",
       "id": "75e3de7f-f53c-41be-ab95-4ad52fc9b2fc",
-      "x": -98.88802809096788,
-      "y": 633.333652268651,
+      "x": -241.1903611914307,
+      "y": 730.8010037073242,
       "width": 213.28491145120483,
       "height": 126.49719007921703,
       "text": "configs/hpo.yaml\n\nHPO search space\nand budget"

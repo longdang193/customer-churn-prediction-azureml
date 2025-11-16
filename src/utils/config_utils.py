@@ -1,44 +1,17 @@
-"""Configuration parsing and loading utilities."""
+"""Data preparation configuration utilities."""
 
 import argparse
 from pathlib import Path
 from typing import Any, Dict
 
 from .config_loader import get_config_value, load_config
+from .path_utils import get_project_root
+from .type_utils import parse_bool
 
-DEFAULT_CONFIG = Path(__file__).parents[2] / "configs" / "data.yaml"
+# Default configuration paths and values
+DEFAULT_CONFIG = get_project_root() / "configs" / "data.yaml"
 DEFAULT_COLUMNS_TO_REMOVE = ("RowNumber", "CustomerId", "Surname")
 DEFAULT_CATEGORICAL = ("Geography", "Gender")
-
-
-def parse_bool(value: Any, *, default: bool) -> bool:
-    """Parse loose truthy/falsey values without relying on distutils.
-    
-    Args:
-        value: Value to parse as boolean
-        default: Default value if value is None
-        
-    Returns:
-        Boolean value
-        
-    Raises:
-        ValueError: If value cannot be interpreted as boolean
-    """
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "off"}:
-            return False
-
-    raise ValueError(f"Cannot interpret value '{value}' as boolean.")
 
 
 def get_data_prep_config(args: argparse.Namespace) -> Dict[str, Any]:

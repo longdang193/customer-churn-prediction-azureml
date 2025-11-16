@@ -1,6 +1,5 @@
 $schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
 name: bank-churn-env
 version: "1"
-image: <your-acr-name>.azurecr.io/bank-churn:latest
+image: churnmlacr2025.azurecr.io/bank-churn:1
 description: Environment for churn prediction pipeline
-

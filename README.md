@@ -93,8 +93,8 @@ Create a `config.env` file with your workspace details:
 AZURE_SUBSCRIPTION_ID=<subscription>
 AZURE_RESOURCE_GROUP=<resource-group>
 AZURE_WORKSPACE_NAME=<workspace>
-AZURE_RAW_DATA_ASSET=<data-asset-name>
-AZURE_RAW_DATA_VERSION=<data-version>
+DATA_ASSET_FULL=<data-asset-name>
+DATA_VERSION=<data-version>
 ```
 
 Authenticate with Azure (`az login`) before submitting jobs.

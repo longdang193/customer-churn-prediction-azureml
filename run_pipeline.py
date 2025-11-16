@@ -1,6 +1,5 @@
 """Training pipeline with fixed hyperparameters from config."""
 
-import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -8,21 +7,7 @@ from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.ai.ml import MLClient, dsl, load_component, Input
 
-
-def load_azure_config() -> Dict[str, Any]:
-    """Load Azure ML configuration from environment variables."""
-    load_dotenv("config.env")
-
-    config = {
-        "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID"),
-        "resource_group": os.getenv("AZURE_RESOURCE_GROUP"),
-        "workspace_name": os.getenv("AZURE_WORKSPACE_NAME"),
-    }
-
-    if not all(config.values()):
-        raise ValueError("Azure ML configuration is missing in .env file.")
-
-    return config
+from src.utils import load_azure_config, get_data_asset_config
 
 
 def load_pipeline_components(components_dir: Path) -> Dict[str, Any]:
@@ -69,8 +54,10 @@ def main():
     components = load_pipeline_components(Path("aml/components"))
     pipeline = define_pipeline(components)
 
-    data_asset_name = os.getenv("AZURE_RAW_DATA_ASSET", "bank-churn-raw")
-    data_asset_version = os.getenv("AZURE_RAW_DATA_VERSION", "1")
+    # Get data asset configuration
+    data_asset_config = get_data_asset_config()
+    data_asset_name = data_asset_config["data_asset_name"]
+    data_asset_version = data_asset_config["data_asset_version"]
     pipeline_input = Input(
         type="uri_folder",
         path=f"azureml:{data_asset_name}:{data_asset_version}",

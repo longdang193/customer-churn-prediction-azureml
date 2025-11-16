@@ -4,13 +4,15 @@
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-churn-ml-project}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-churn-ml-project-2025-11-15}"
 LOCATION="${AZURE_LOCATION:-southeastasia}"
 WORKSPACE_NAME="${AZURE_WORKSPACE_NAME:-churn-ml-workspace}"
 COMPUTE_CLUSTER_NAME="${AZURE_COMPUTE_CLUSTER_NAME:-cpu-cluster}"
 COMPUTE_CLUSTER_SIZE="${COMPUTE_CLUSTER_SIZE:-Standard_DS2_v2}"
 MIN_NODES="${MIN_NODES:-0}"
 MAX_NODES="${MAX_NODES:-2}"
+ACR_NAME="${AZURE_ACR_NAME:-}"
+ACR_SKU="${ACR_SKU:-Basic}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -64,10 +66,34 @@ create_compute_cluster() {
         print_warning "Compute cluster already exists"
         return
     fi
+    print_info "Creating compute cluster with system-assigned managed identity for ACR access"
     az ml compute create --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" \
         --name "$COMPUTE_CLUSTER_NAME" --type AmlCompute --size "$COMPUTE_CLUSTER_SIZE" \
-        --min-instances "$MIN_NODES" --max-instances "$MAX_NODES" --idle-time-before-scale-down 1800
-    print_info "Compute cluster created"
+        --min-instances "$MIN_NODES" --max-instances "$MAX_NODES" --idle-time-before-scale-down 1800 \
+        --identity-type systemassigned
+    print_info "Compute cluster created with managed identity"
+    
+    # If ACR exists, AcrPull role is automatically granted by Azure ML
+    if [ -n "$ACR_NAME" ]; then
+        print_info "AcrPull role will be automatically granted to compute managed identity (ACR exists)"
+    fi
+}
+
+create_acr() {
+    if [ -z "$ACR_NAME" ]; then
+        print_warning "AZURE_ACR_NAME not set. Skipping ACR creation."
+        print_info "You can create ACR later using: az acr create --resource-group $RESOURCE_GROUP --name <acr-name> --sku Basic --location $LOCATION"
+        return
+    fi
+    
+    print_info "Creating Azure Container Registry: $ACR_NAME"
+    if az acr show --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" &> /dev/null; then
+        print_warning "ACR already exists"
+    else
+        az acr create --resource-group "$RESOURCE_GROUP" --name "$ACR_NAME" --sku "$ACR_SKU" --location "$LOCATION"
+        print_info "ACR created successfully"
+        print_info "ACR login server: $ACR_NAME.azurecr.io"
+    fi
 }
 
 display_info() {
@@ -76,8 +102,21 @@ display_info() {
     echo "Workspace: $WORKSPACE_NAME"
     echo "Location: $LOCATION"
     echo "Compute Cluster: $COMPUTE_CLUSTER_NAME ($MIN_NODES-$MAX_NODES nodes)"
+    if [ -n "$ACR_NAME" ]; then
+        echo "ACR: $ACR_NAME ($ACR_NAME.azurecr.io)"
+        echo "  - AcrPull role automatically granted to compute managed identity"
+    else
+        echo "ACR: Not created (set AZURE_ACR_NAME in config.env to create)"
+    fi
     echo ""
-    echo "Next: Access https://ml.azure.com and navigate to workspace: $WORKSPACE_NAME"
+    echo "Next steps:"
+    echo "1. Access https://ml.azure.com and navigate to workspace: $WORKSPACE_NAME"
+    if [ -n "$ACR_NAME" ]; then
+        echo "2. Update aml/environments/environment.yml with ACR name: $ACR_NAME"
+        echo "3. Build and push Docker image to ACR (see Step 11 in MASTER_PLAN.md)"
+    else
+        echo "2. Create ACR and update config.env, then recreate compute cluster for automatic AcrPull"
+    fi
 }
 
 main() {
@@ -86,6 +125,8 @@ main() {
     check_azure_login
     create_resource_group
     create_workspace
+    # Create ACR BEFORE compute cluster so AcrPull role is automatically granted
+    create_acr
     create_compute_cluster
     echo ""
     display_info

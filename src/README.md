@@ -238,6 +238,6 @@ Results and individual trials can be inspected in Azure ML Studio using the URL 
 
 - **Python version compatibility:** The project requires **Python 3.9** due to `azureml-core` compatibility. Ensure your Docker image uses Python 3.9. Do not use Python 3.10+ union type syntax (`Type | None`); use `Optional[Type]` instead.
 
-- **Data asset configuration:** Both `run_pipeline.py` and `run_hpo.py` now automatically load `config.env`. Ensure `AZURE_RAW_DATA_ASSET` and `AZURE_RAW_DATA_VERSION` are set correctly in `config.env`.
+- **Data asset configuration:** Both `run_pipeline.py` and `run_hpo.py` use `get_data_asset_config()` to load data asset configuration from `config.env`. Ensure `DATA_ASSET_FULL` and `DATA_VERSION` are set correctly in `config.env`.
 
 For more detailed troubleshooting information, see [`../docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md).

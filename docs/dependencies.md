@@ -2,6 +2,8 @@
 
 Centralized project dependencies and workflow for reproducible environments.
 
+Centralized project dependencies and workflow for reproducible environments.
+
 ## Files
 
 - `requirements.in` — application/runtime dependencies (unpinned)
@@ -36,5 +38,4 @@ python -m pip install -r dev-requirements.txt
 
 - All packages listed in `requirements.in` are runtime dependencies required for the project.
 - If you change `requirements.in` or `dev-requirements.in`, re-run `pip-compile` and commit the updated `*.txt` files.
-
 

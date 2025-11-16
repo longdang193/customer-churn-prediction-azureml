@@ -48,7 +48,7 @@ def main() -> None:
     mlflow_config = get_config_value(mlflow_config, 'mlflow', {})
     
     hpo_mode = is_hpo_mode(args.model_type)
-        hyperparams_by_model = prepare_regular_hyperparams(training_config, args.set)
+    hyperparams_by_model = prepare_regular_hyperparams(training_config, args.set)
     
     models_to_train = determine_models_to_train(hpo_mode, args.model_type, training_config)
     

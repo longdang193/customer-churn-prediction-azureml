@@ -1,47 +1,51 @@
-# Troubleshooting and Important Considerations
+# Troubleshooting Guide
 
-This document contains important considerations and troubleshooting information for running the Azure ML pipeline for customer churn prediction.
-
-## Table of Contents
-
-1. [Environment Setup](#environment-setup)
-2. [Azure ML Configuration](#azure-ml-configuration)
-3. [MLflow Integration Issues](#mlflow-integration-issues)
-4. [Docker Image Compatibility](#docker-image-compatibility)
-5. [Data Access Issues](#data-access-issues)
-6. [Hyperparameter Optimization (HPO) Issues](#hyperparameter-optimization-hpo-issues)
-7. [Common Errors and Solutions](#common-errors-and-solutions)
-8. [Best Practices](#best-practices)
-
----
+This document contains troubleshooting information and solutions for common issues when running the Azure ML pipeline for customer churn prediction.
 
 ## Environment Setup
 
-### Python Version Compatibility
+### Python Version Requirements
 
-**Critical**: The project uses **Python 3.9** due to compatibility requirements with `azureml-core` 1.1.5.7.
+**Critical**: The project requires **Python 3.9** due to compatibility with `azureml-core` 1.1.5.7.
 
-- **Issue**: `azureml-core` 1.1.5.7 is not compatible with Python 3.10+ due to `collections.Iterable` import issues
-- **Solution**: Dockerfile uses `python:3.9-slim` as base image
-- **Note**: Requirements files (`requirements.txt` and `dev-requirements.txt`) must be compiled with Python 3.9
+- **Dockerfile**: Uses `python:3.9-slim` as base image
+- **Local Development**: Use Python 3.9 virtual environment
+- **Type Hints**: Use `Optional[Type]` from `typing` module, not `Type | None` (Python 3.10+ syntax)
 
-**Type Hint Compatibility**: 
-- **Do NOT use** Python 3.10+ union syntax: `Type | None` (causes `TypeError`)
-- **Use** Python 3.9 compatible syntax: `Optional[Type]` from `typing` module
-- The `tuple[...]` syntax is valid in Python 3.9, only the `|` union operator requires Python 3.10+
+See [[docs/python_setup.md]] for detailed Python 3.9 installation and setup instructions.
 
-**To recompile requirements**:
+### Compiling Requirements
+
+**Always compile requirements with Python 3.9** to ensure compatibility:
+
+```bash
+# Using Python 3.9 virtual environment (recommended)
+python3.9 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel pip-tools
+
+# Compile requirements first
+pip-compile requirements.in -o requirements.txt
+
+# Compile dev-requirements with constraints from requirements.txt
+# This ensures shared dependencies (matplotlib, scipy, etc.) use compatible versions
+pip-compile dev-requirements.in -o dev-requirements.txt --constraint requirements.txt
+```
+
+**Or using Docker**:
+
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace python:3.9-slim bash -c \
   "apt-get update -qq && apt-get install -y -qq gcc > /dev/null 2>&1 && \
-   pip install -q pip-tools && \
+   pip install --upgrade pip setuptools wheel pip-tools && \
    pip-compile --output-file requirements.txt requirements.in && \
-   pip-compile --output-file dev-requirements.txt dev-requirements.in"
+   pip-compile --constraint requirements.txt --output-file dev-requirements.txt dev-requirements.in
 ```
 
-### Package Version Compatibility
+### Package Version Constraints
 
-Several packages have version constraints for Python 3.9:
+For Python 3.9 compatibility, these packages have specific version constraints:
+
 - `numpy`: 1.26.4 (not 2.x)
 - `scipy`: 1.13.1 (not 1.16+)
 - `matplotlib`: 3.9.4 (not 3.10+)
@@ -56,165 +60,174 @@ Several packages have version constraints for Python 3.9:
 
 ### Required Environment Variables
 
-Ensure `config.env` is properly configured with:
-- `AZURE_SUBSCRIPTION_ID`
-- `AZURE_RESOURCE_GROUP`
-- `AZURE_WORKSPACE_NAME`
-- `AZURE_RAW_DATA_ASSET`: Name of registered data asset (default: "churn-data")
-- `AZURE_RAW_DATA_VERSION`: Version of data asset (default: "3")
+Create `config.env` with the following variables:
 
-### Compute Cluster Configuration
-
-**Important**: The compute cluster must have:
-- `max_instances >= 1` (not 0)
-- Managed identity with proper RBAC permissions
-
-**To check and update**:
 ```bash
-az ml compute show --name cpu-cluster --resource-group <rg> --workspace-name <ws>
+AZURE_SUBSCRIPTION_ID=<your-subscription-id>
+AZURE_RESOURCE_GROUP=<your-resource-group>
+AZURE_WORKSPACE_NAME=<your-workspace-name>
+DATA_ASSET_FULL=churn-data
+DATA_VERSION=3
+```
+
+**Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`. If the file is missing, they fall back to defaults.
+
+### Compute Cluster Setup
+
+**Requirements**:
+
+- `max_instances >= 1` (cannot be 0 - Azure ML requirement)
+- `min_instances` can be 0 (allows auto-scale down when idle)
+- Managed identity with proper RBAC permissions OR ACR admin user enabled
+
+**Check current settings**:
+
+```bash
+az ml compute show --name cpu-cluster --resource-group <rg> --workspace-name <ws> \
+  --query "{Name:name, MinInstances:scale_settings.min_node_count, MaxInstances:scale_settings.max_node_count}" \
+  -o table
+```
+
+**Update settings**:
+
+```bash
+# Set min_instances to 0 (allows auto-scale down)
+az ml compute update --name cpu-cluster --resource-group <rg> --workspace-name <ws> --set min_instances=0
+
+# Ensure max_instances is at least 1
 az ml compute update --name cpu-cluster --resource-group <rg> --workspace-name <ws> --set max_instances=2
 ```
 
-### Managed Identity Permissions
+**Note**: You cannot set `max_instances=0`. To stop all nodes, set `min_instances=0` and wait for auto-scale down, or delete nodes via Azure Portal.
 
-The compute cluster's managed identity requires:
+### ACR Authentication for Compute Cluster
 
-1. **Azure Container Registry (ACR)**: `AcrPull` role
-   ```bash
-   # Get compute identity principal ID
-   COMPUTE_ID=$(az ml compute show --name cpu-cluster --resource-group <rg> --workspace-name <ws> --query identity.principal_id -o tsv)
-   
-   # Grant AcrPull on ACR
-   az role assignment create \
-     --assignee $COMPUTE_ID \
-     --role AcrPull \
-     --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ContainerRegistry/registries/<acr-name>
-   ```
+The compute cluster needs access to pull Docker images from Azure Container Registry (ACR). Use managed identity with AcrPull for secure, production-ready authentication.
 
-2. **Storage Account**: `Storage Blob Data Reader` role
-   ```bash
-   # Grant Storage Blob Data Reader on storage account
-   az role assignment create \
-     --assignee $COMPUTE_ID \
-     --role "Storage Blob Data Reader" \
-     --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<storage-name>
-   ```
+**Important**: When you create a compute cluster with system-assigned managed identity, Azure ML **automatically grants** the `AcrPull` role on the workspace ACR, **if the ACR exists before the compute is created**.
 
-3. **Workspace Managed Identity**: Also needs `Storage Blob Data Reader` on the storage account
+**Create compute cluster with system-assigned managed identity**:
 
-**Critical**: After granting permissions, **recycle the compute node** to pick up new credentials:
-- Delete the node from Azure ML Studio, OR
-- Scale cluster to 0 and back up
-
----
-
-## MLflow Integration Issues
-
-### Azure ML MLflow Limitations
-
-Azure ML's MLflow integration has several limitations compared to standard MLflow:
-
-#### 1. No Nested Runs Support
-
-**Issue**: `mlflow.start_run(nested=True)` causes API errors in Azure ML
-
-**Solution**: In `src/train.py`, nested runs are disabled when running in Azure ML:
-- Detects Azure ML environment via `MLFLOW_TRACKING_URI`
-- Uses active run directly instead of creating nested runs
-- Logs model name as tag to identify different models
-
-#### 2. No Model Registry API
-
-**Issue**: `mlflow.sklearn.log_model()` calls `/api/2.0/mlflow/logged-models` which returns 404
-
-**Solution**: In Azure ML, models are saved as pickle files to outputs directory:
-- Saves model to `AZUREML_ARTIFACTS_DIRECTORY` or `AZUREML_OUTPUT_DIRECTORY`
-- Attempts `mlflow.log_artifact()` without artifact_path (may fail gracefully)
-- Azure ML automatically captures outputs directory as artifacts
-
-#### 3. Artifact API Signature Differences
-
-**Issue**: `mlflow.log_artifact(file_path, artifact_path)` and `mlflow.log_artifacts(dir_path, artifact_path)` have different signatures in Azure ML
-
-**Error**: `azureml_artifacts_builder() takes from 0 to 1 positional arguments but 2 were given`
-
-**Solution**: 
-- Use `mlflow.log_artifact(file_path)` without artifact_path parameter
-- If that fails, gracefully handle exception and rely on Azure ML's native artifact capture
-- Never use `mlflow.artifacts.download_artifacts()` in Azure ML - use direct file access instead
-
-#### 4. Active Run Context
-
-**Issue**: Azure ML automatically creates an active MLflow run, causing conflicts when trying to start a new one
-
-**Error**: `Cannot start run with ID ... because active run ID does not match environment run ID`
-
-**Solution**: Check for active run before starting a new one:
-```python
-tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
-is_azure_ml = "azureml" in tracking_uri.lower() if tracking_uri else False
-
-if not is_azure_ml:
-    # Local execution: start new run
-    mlflow.set_experiment(experiment_name)
-    parent_run = mlflow.start_run(run_name="Churn_Training_Pipeline")
-    started_run = True
-else:
-    # Azure ML: use existing active run
-    parent_run = mlflow.active_run()
-    started_run = False
+```bash
+az ml compute create \
+  --name cpu-cluster \
+  --type amlcompute \
+  --size Standard_DS2_v2 \
+  --min-instances 0 \
+  --max-instances 2 \
+  --identity-type systemassigned \
+  --resource-group <rg> \
+  --workspace-name <ws>
 ```
 
+**Automatic role assignment**:
+
+- If workspace ACR exists **before** creating compute: `AcrPull` role is **automatically granted** to compute's managed identity
+- If compute is created **before** workspace ACR: You must **manually grant** `AcrPull` role
+
+**Manual role assignment** (only needed if compute was created before ACR):
+
+```bash
+# Load values from config.env
+source <(grep -E "AZURE_RESOURCE_GROUP|AZURE_WORKSPACE_NAME|AZURE_ACR_NAME|AZURE_SUBSCRIPTION_ID|AZURE_STORAGE_ACCOUNT|AZURE_COMPUTE_CLUSTER_NAME" config.env | sed 's/^/export /' | sed 's/"//g')
+
+# Get compute identity principal ID
+COMPUTE_ID=$(az ml compute show \
+  --name $AZURE_COMPUTE_CLUSTER_NAME \
+  --resource-group $AZURE_RESOURCE_GROUP \
+  --workspace-name $AZURE_WORKSPACE_NAME \
+  --query identity.principal_id -o tsv 2>/dev/null)
+
+if [ -n "$COMPUTE_ID" ] && [ "$COMPUTE_ID" != "None" ]; then
+  echo "Granting AcrPull to compute identity: $COMPUTE_ID"
+  
+  # Grant AcrPull on ACR (only needed if compute was created before ACR)
+  az role assignment create \
+    --assignee $COMPUTE_ID \
+    --role AcrPull \
+    --scope /subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.ContainerRegistry/registries/$AZURE_ACR_NAME
+
+  # Grant Storage Blob Data Reader on storage account
+  az role assignment create \
+    --assignee $COMPUTE_ID \
+    --role "Storage Blob Data Reader" \
+    --scope /subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$AZURE_STORAGE_ACCOUNT
+else
+  echo "Compute cluster doesn't have managed identity enabled"
+  echo "Recreate compute with --identity-type systemassigned"
+fi
+```
+
+**Proper Setup Order**:
+
+1. **Create workspace** (may auto-create ACR)
+2. **Create or configure ACR** (ensure it exists for managed identity)
+3. **Create compute cluster** with `--identity-type systemassigned` (AcrPull automatically granted if ACR exists)
+4. **Push Docker images** to ACR
+5. **Register environment** pointing to ACR image
+
+**Reference**: [Azure ML Identity-based Service Authentication](https://learn.microsoft.com/en-us/azure/machine-learning/how-to-identity-based-service-authentication?view=azureml-api-2&tabs=cli#scenario-azure-container-registry-without-admin-user)
+
 ---
 
-## Docker Image Compatibility
+## Docker & Environment
 
-### Base Image
+### Building Docker Image
 
-**Current**: `python:3.9-slim`
+**Base Image**: `python:3.9-slim` (for compatibility with `azureml-core` 1.1.5.7)
 
-**Why**: Compatibility with `azureml-core` 1.1.5.7
+**Important**: The Dockerfile sets `ENV PYTHONPATH=/app/src` to enable imports like `from data import ...` and `from utils import ...`. This matches how Azure ML components run the code (from the `src/` directory).
 
-### Building and Pushing
+**Build and push**:
 
-**Always rebuild after dependency changes**:
 ```bash
-# Build the Docker image locally
-docker build -t bank-churn:latest .
+# Build locally
+docker build -t bank-churn:1 .
 
 # Tag for ACR
-docker tag bank-churn:latest <your-acr-name>.azurecr.io/bank-churn:latest
+docker tag bank-churn:1 <your-acr-name>.azurecr.io/bank-churn:1
 
 # Push to ACR
-docker push <your-acr-name>.azurecr.io/bank-churn:latest
-```
+docker push <your-acr-name>.azurecr.io/bank-churn:1
 
-**Verify image is pushed**:
-```bash
+# Verify
 az acr repository show-tags --name <your-acr-name> --repository bank-churn
 ```
 
-### Environment Registration
+### Testing Docker Image
 
-The Docker image should be registered as an Azure ML environment using Azure CLI:
+**Test commands** (match how Azure ML runs components):
 
-1. **Update `aml/environments/environment.yml`** with your ACR name:
+```bash
+# Test data_prep component
+docker run --rm bank-churn:1 bash -c "cd /app/src && python data_prep.py --help"
+
+# Test package imports
+docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
+```
+
+### Registering Azure ML Environment
+
+1. **Update `aml/environments/environment.yml`**:
+
    ```yaml
    $schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
    name: bank-churn-env
    version: "1"
-   image: <your-acr-name>.azurecr.io/bank-churn:latest
+   image: <your-acr-name>.azurecr.io/bank-churn:1
    description: Environment for churn prediction pipeline
    ```
 
 2. **Register the environment**:
+
    ```bash
    az ml environment create --file aml/environments/environment.yml \
      --resource-group <resource-group> \
      --workspace-name <workspace-name>
    ```
 
-3. **Verify registration**:
+3. **Verify**:
+
    ```bash
    az ml environment show --name bank-churn-env --version 1 \
      --resource-group <resource-group> \
@@ -223,18 +236,15 @@ The Docker image should be registered as an Azure ML environment using Azure CLI
 
 ---
 
-## Data Access Issues
+## Data Access
 
-### Data Asset Registration
+### Registering Data Asset
 
 **Issue**: Pipeline fails with `ResourceNotFoundError` for data asset
 
-**Solution**: Ensure data asset is registered as `uri_folder` type:
-```bash
-# List existing data assets
-az ml data list --resource-group <rg> --workspace-name <ws>
+**Solution**: Register data asset as `uri_folder` type:
 
-# Upload and register data as uri_folder (directory containing CSV file(s))
+```bash
 az ml data upload \
   --name churn-data \
   --version 3 \
@@ -244,282 +254,354 @@ az ml data upload \
   --workspace-name <ws>
 ```
 
-**Note**: The data asset must be registered as `uri_folder` type. The `data_prep` component expects a folder input and will automatically load all CSV files in the folder.
+**Important**: The data asset must be `uri_folder` type. The `data_prep` component expects a folder input and automatically loads all CSV files in the folder.
 
-**Update config.env**:
+**Update `config.env`**:
+
 ```bash
-AZURE_RAW_DATA_ASSET="churn-data"
-AZURE_RAW_DATA_VERSION="3"
+DATA_ASSET_FULL="churn-data"
+DATA_VERSION="1"
 ```
 
-### Storage Access
+### Storage Access Issues
 
 **Issue**: `ScriptExecution.StreamAccess.NotFound` when accessing data
 
-**Symptoms**: 
-- Error: `URI: azureml://.../workspaceblobstore/paths/data/churn.csv`
-- Data prep step fails
-
 **Solution**:
+
 1. Verify managed identity has `Storage Blob Data Reader` role on storage account
-2. Recycle compute node after granting permissions
+2. Ensure compute cluster has system-assigned managed identity enabled
 3. Re-upload data to ensure it's accessible
-
-### Data Asset Configuration Loading
-
-**Issue**: Pipeline fails with `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1` even though `config.env` specifies a different data asset
-
-**Cause**: Pipeline scripts not loading `config.env` explicitly, falling back to hardcoded defaults
-
-**Solution**: Both `run_pipeline.py` and `run_hpo.py` now automatically load `config.env`. Ensure your `config.env` file has:
-```bash
-AZURE_RAW_DATA_ASSET="churn-data"
-AZURE_RAW_DATA_VERSION="3"
-```
-
-**Note**: The scripts will fall back to defaults (`bank-churn-raw` version 1) if `config.env` is not found or variables are not set. See the "Common Errors and Solutions" section below for detailed troubleshooting.
 
 ---
 
-## Hyperparameter Optimization (HPO) Issues
+## MLflow Integration
+
+### Azure ML MLflow Limitations
+
+Azure ML's MLflow integration has limitations compared to standard MLflow:
+
+#### 1. No Nested Runs
+
+**Issue**: `mlflow.start_run(nested=True)` causes API errors
+
+**Solution**: Code detects Azure ML environment and uses active run directly instead of creating nested runs.
+
+#### 2. No Model Registry API
+
+**Issue**: `mlflow.sklearn.log_model()` returns 404
+
+**Solution**: Models are saved as pickle files to outputs directory. Azure ML automatically captures outputs as artifacts.
+
+#### 3. Artifact API Differences
+
+**Issue**: `mlflow.log_artifact(file_path, artifact_path)` fails with signature error
+
+**Solution**: Use `mlflow.log_artifact(file_path)` without artifact_path parameter, or rely on Azure ML's native artifact capture.
+
+#### 4. Active Run Context
+
+**Issue**: Azure ML automatically creates an active MLflow run, causing conflicts
+
+**Solution**: Code checks for active run before starting a new one:
+
+```python
+tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
+is_azure_ml = "azureml" in tracking_uri.lower() if tracking_uri else False
+
+if not is_azure_ml:
+    parent_run = mlflow.start_run(run_name="Churn_Training_Pipeline")
+else:
+    parent_run = mlflow.active_run()
+```
+
+---
+
+## Hyperparameter Optimization
 
 ### Search Space Configuration
-
-**Issue**: Models not being trained or receiving incorrect hyperparameters
-
-**Root Causes**:
-1. Model type not included in search space
-2. Hyperparameters not filtered by model type
-3. Invalid hyperparameter ranges (e.g., `min_samples_split < 2` for Random Forest)
-4. Models with no hyperparameters causing redundant trials
 
 **Best Practices**:
 
 1. **Always include `model_type` in search space**:
+
    ```yaml
    search_space:
-     rf: ...
-     xgboost: ...
+     rf:
+       n_estimators: [100, 200]
+       max_depth: [6, 10]
+     xgboost:
+       n_estimators: [100, 200]
+       learning_rate: [0.1, 0.2]
      # logreg: {}  # Comment out if no hyperparameters to optimize
    ```
 
 2. **Validate hyperparameter ranges**:
    - Random Forest: `min_samples_split >= 2`, `min_samples_leaf >= 1`
    - XGBoost: `n_estimators > 0`, `max_depth > 0`, `learning_rate > 0`
-   - Logistic Regression: If included, add hyperparameters like `C`, `penalty`, `solver`
 
-3. **Test configuration before full HPO**:
-   ```bash
-   # Test with single model and small budget
-   # In configs/hpo.yaml, set:
-   # max_trials: 2
-   # search_space: { rf: { n_estimators: [100, 200] } }
+3. **Test with small budget first**:
+
+   ```yaml
+   budget:
+     max_trials: 2
    ```
 
 ### Model Type Filtering
 
-**Issue**: Each trial should train only one model type, but hyperparameters from other models are being passed
+The code automatically filters hyperparameters based on `model_type`:
 
-**Solution**: The code automatically filters hyperparameters based on `model_type`:
 - `hpo_utils.py` builds parameter space with `model_type` as categorical choice
 - `train.py` receives `--model-type` argument in HPO mode
-- `train_all_models()` filters `hyperparams_by_model` to only include the current model type
+- `train_all_models()` filters hyperparameters to only include the current model type
 
 **Verification**: Check that each trial in Azure ML Studio has a single `model_type` tag and only relevant hyperparameters logged.
 
-### Trial Failures
-
-**Common failure patterns**:
-
-1. **All trials fail immediately**: Check Docker image, environment variables, data access
-2. **Specific model types fail**: Check hyperparameter validation (e.g., `min_samples_split >= 2`)
-3. **Intermittent failures**: Check compute resources, storage access, MLflow connectivity
-
-**Debugging steps**:
-1. Check individual trial logs in Azure ML Studio
-2. Verify hyperparameters logged match the model type
-3. Test the model type locally with the same hyperparameters
-4. Check for validation errors in `train.py` logs
-
 ---
 
-## Common Errors and Solutions
+## Common Errors
 
-### Error: `ImportError: cannot import name 'Iterable' from 'collections'`
+### Python & Environment Errors
+
+#### `ImportError: cannot import name 'Iterable' from 'collections'`
 
 **Cause**: Python 3.10+ compatibility issue with `azureml-core` 1.1.5.7
 
 **Solution**: Use Python 3.9 in Dockerfile
 
-### Error: `AttributeError: 'CommandComponent' object has no attribute 'sweep'`
+#### `TypeError: '<' not supported between instances of 'str' and 'int'` when compiling requirements
 
-**Cause**: Incorrect usage of sweep API in Azure ML v2 SDK
+**Cause**: Outdated setuptools version causing matplotlib build failures
 
-**Solution**: Call `.sweep()` on the Command builder, not the component:
-```python
-base_train_job = components["train"](processed_data=data_prep_job.outputs.processed_data)
-sweep_job = base_train_job.sweep(...)
+**Solution**: Upgrade setuptools before compiling:
+
+```bash
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip-compile requirements.in -o requirements.txt
 ```
 
-### Error: `Requested 1 nodes but AzureMLCompute cluster only has 0 maximum nodes`
+#### `TypeError: unsupported operand type(s) for |: '_GenericAlias' and 'NoneType'`
+
+**Cause**: Code uses Python 3.10+ union syntax (`JSONDict | None`) but project requires Python 3.9
+
+**Solution**: Replace `|` union syntax with `Optional[Type]` from `typing` module
+
+#### `ImportError: cannot import name 'encode_categoricals' from 'data'` in Docker
+
+**Cause**: Python cannot find the `data` module when running scripts in Docker container
+
+**Error Details**:
+
+- Error occurs when running `python -m src.data_prep` or `python data_prep.py` in Docker
+- Code uses absolute imports like `from data import ...` which expect `src/` to be in Python path
+- Azure ML components run from `src/` directory (via `code: ../../src`), but Docker test commands may not
+
+**Solution**: The Dockerfile includes `ENV PYTHONPATH=/app/src` to add the `src/` directory to Python's module search path. This allows imports to work correctly.
+
+**Verification**: Test the Docker image:
+
+```bash
+docker run --rm bank-churn:1 bash -c "cd /app/src && python data_prep.py --help"
+```
+
+**Note**: When testing locally, run commands from `/app/src` directory to match Azure ML's execution environment.
+
+### Azure ML Errors
+
+#### `Requested 1 nodes but AzureMLCompute cluster only has 0 maximum nodes`
 
 **Cause**: Compute cluster `max_instances` set to 0
 
-**Solution**: Update compute cluster:
-```bash
-az ml compute update --name cpu-cluster --set max_instances=2
+**Solution**: `az ml compute update --name cpu-cluster --set max_instances=2`
+
+#### `Failed to pull Docker image ... This error may occur because the compute could not authenticate`
+
+**Error Message**:
+
+```text
+Failed to pull Docker image churnmlacr2025.azurecr.io/bank-churn:1. 
+This error may occur because the compute could not authenticate with the Docker registry 
+to pull the image. If using ACR please ensure the ACR has Admin user enabled or a Managed 
+Identity with `AcrPull` access to the ACR is assigned to the compute.
 ```
 
-### Error: `Failed to pull Docker image ... This error may occur because the compute could not authenticate`
+**Causes**:
 
-**Cause**: Compute managed identity lacks `AcrPull` permission
+1. Compute managed identity lacks `AcrPull` permission (compute was created before ACR, so automatic role assignment didn't occur)
+2. Compute cluster doesn't have system-assigned managed identity enabled
+3. Docker image doesn't exist in ACR
 
-**Solution**: Grant `AcrPull` role and recycle compute node
+**Solutions**:
 
-### Error: `mlflow.exceptions.MlflowException: Cannot start run with ID ...`
+**Solution 1: Use Managed Identity** (Recommended):
 
-**Cause**: Trying to start a new MLflow run when Azure ML already has one active
+**If compute was created with managed identity but before ACR existed**:
 
-**Solution**: Check for active run and use it instead of starting a new one (see MLflow Integration Issues section)
+```bash
+# Manually grant AcrPull role (see [ACR Authentication for Compute Cluster](#acr-authentication-for-compute-cluster))
+# Then recycle compute nodes
+```
 
-### Error: `API request to endpoint /api/2.0/mlflow/logged-models failed with error code 404`
+**If compute doesn't have managed identity**:
 
-**Cause**: Azure ML doesn't support MLflow model registry API
+```bash
+# Recreate compute with system-assigned managed identity
+# Azure ML will automatically grant AcrPull if ACR exists
+az ml compute create \
+  --name cpu-cluster \
+  --type amlcompute \
+  --size Standard_DS2_v2 \
+  --min-instances 0 \
+  --max-instances 2 \
+  --identity-type systemassigned \
+  --resource-group <rg> \
+  --workspace-name <ws>
+```
 
-**Solution**: Save models as pickle files to outputs directory instead of using `mlflow.sklearn.log_model()`
+**Solution 2: Verify Image Exists in ACR**:
 
-### Error: `azureml_artifacts_builder() takes from 0 to 1 positional arguments but 2 were given`
+```bash
+ACR_NAME=$(grep AZURE_ACR_NAME config.env | cut -d'"' -f2)
+az acr repository show-tags --name $ACR_NAME --repository bank-churn --output table
 
-**Cause**: Azure ML's MLflow artifact APIs have different signatures
+# If image doesn't exist, build and push:
+docker build -t bank-churn:1 .
+docker tag bank-churn:1 $ACR_NAME.azurecr.io/bank-churn:1
+docker push $ACR_NAME.azurecr.io/bank-churn:1
+```
 
-**Solution**: 
-- Use `mlflow.log_artifact(file_path)` without artifact_path
-- Or save to Azure ML outputs directory and let Azure ML capture it automatically
+**Troubleshooting if still failing**:
 
-### Error: `sklearn.utils._param_validation.InvalidParameterError: The 'min_samples_split' parameter of RandomForestClassifier must be an int in the range [2, inf)`
+1. **Verify compute has managed identity**:
 
-**Cause**: Random Forest hyperparameter search space included `min_samples_split: [1, 2, ...]` which violates sklearn's requirement that `min_samples_split >= 2`
+   ```bash
+   source <(grep -E "AZURE_RESOURCE_GROUP|AZURE_WORKSPACE_NAME|AZURE_COMPUTE_CLUSTER_NAME" config.env | sed 's/^/export /' | sed 's/"//g')
+   az ml compute show --name $AZURE_COMPUTE_CLUSTER_NAME \
+     --resource-group $AZURE_RESOURCE_GROUP \
+     --workspace-name $AZURE_WORKSPACE_NAME \
+     --query identity -o json
+   ```
 
-**Solution**: 
-- Ensure `min_samples_split` in HPO search space is always `>= 2`
-- The code now validates and corrects this automatically, but best practice is to set correct ranges in `configs/hpo.yaml`
-- Example fix in `configs/hpo.yaml`:
-  ```yaml
-  search_space:
-    rf:
-      min_samples_split: [2, 5, 10]  # Never use 1
-  ```
+2. **Verify AcrPull role is assigned**:
 
-### Error: XGBoost models not being trained in HPO
+   ```bash
+   source <(grep -E "AZURE_RESOURCE_GROUP|AZURE_WORKSPACE_NAME|AZURE_ACR_NAME|AZURE_SUBSCRIPTION_ID|AZURE_COMPUTE_CLUSTER_NAME" config.env | sed 's/^/export /' | sed 's/"//g')
+   COMPUTE_ID=$(az ml compute show \
+     --name $AZURE_COMPUTE_CLUSTER_NAME \
+     --resource-group $AZURE_RESOURCE_GROUP \
+     --workspace-name $AZURE_WORKSPACE_NAME \
+     --query identity.principal_id -o tsv 2>/dev/null)
+   
+   az role assignment list \
+     --assignee $COMPUTE_ID \
+     --scope /subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.ContainerRegistry/registries/$AZURE_ACR_NAME \
+     --query "[?roleDefinitionName=='AcrPull']" -o table
+   ```
 
-**Cause**: XGBoost not included in the HPO search space, or `model_type` filtering not working correctly
+3. **Verify image exists in ACR**:
 
-**Solution**:
-- Ensure `xgboost` is included in `configs/hpo.yaml::search_space`
-- Verify `model_type` is correctly passed to `train.py` and hyperparameters are filtered by model type
-- Check that `hpo_utils.py` correctly builds the parameter space with `model_type` as a categorical choice
+   ```bash
+   ACR_NAME=$(grep AZURE_ACR_NAME config.env | cut -d'"' -f2)
+   az acr repository show-tags --name $ACR_NAME --repository bank-churn --output table
+   ```
 
-### Error: Logistic Regression being trained multiple times with default configurations
+4. **If compute was created before ACR, manually grant AcrPull**:
 
-**Cause**: Logistic Regression included in HPO search space but has no hyperparameters to optimize (`logreg: {}`), causing redundant trials with identical default parameters
+   See [ACR Authentication for Compute Cluster](#acr-authentication-for-compute-cluster) for manual role assignment instructions.
 
-**Solution**:
-- Remove Logistic Regression from HPO search space if it has no hyperparameters:
-  ```yaml
-  search_space:
-    # logreg: {}  # Commented out - no hyperparameters to optimize
-    rf: ...
-    xgboost: ...
-  ```
-- If you want to include Logistic Regression, add hyperparameters to optimize (e.g., `C`, `penalty`, `solver`)
-
-### Error: Models receiving mismatching hyperparameters (e.g., XGBoost receiving Random Forest parameters)
-
-**Cause**: Hyperparameters not filtered by `model_type` before being passed to `train_model()`, causing all hyperparameters from the search space to be passed regardless of which model is being trained
-
-**Solution**:
-- The code now filters hyperparameters in `train_all_models()` based on the current `model_type`
-- In HPO mode, `train.py` receives `--model-type` argument and only passes relevant hyperparameters
-- Ensure `hpo_utils.py` correctly structures the parameter space with `model_type` as a categorical hyperparameter
-
-### Error: All HPO trials failing after code changes
-
-**Cause**: Over-aggressive error handling or validation logic that rejects valid configurations
-
-**Solution**:
-- Keep validation minimal and focused on critical constraints (e.g., `min_samples_split >= 2`)
-- Ensure error handling doesn't prevent valid trials from running
-- Test with a single model type first before running full HPO sweep
-
-### Error: `TypeError: unsupported operand type(s) for |: '_GenericAlias' and 'NoneType'`
-
-**Cause**: Code uses Python 3.10+ union type syntax (`JSONDict | None`) but the project requires Python 3.9
-
-**Error Location**: 
-- `src/training/model_utils.py`: `def apply_hyperparameters(model: Any, hyperparams: JSONDict | None)`
-- `src/training/training.py`: `model_hyperparams: JSONDict | None = None`
-
-**Solution**: Replace `|` union syntax with `Optional` from `typing` module:
-- Change `JSONDict | None` to `Optional[JSONDict]`
-- Ensure `Optional` is imported: `from typing import Optional`
-
-**Fixed Files**:
-- `src/training/model_utils.py`: Line 36
-- `src/training/training.py`: Line 53
-
-**Note**: The `tuple[...]` syntax is valid in Python 3.9, only the `|` union operator requires Python 3.10+.
-
-### Error: `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1`
+#### `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1`
 
 **Cause**: Data asset not found or incorrect configuration in `config.env`
 
-**Solution**: 
-1. Verify `config.env` exists and contains correct values:
-   ```bash
-   AZURE_RAW_DATA_ASSET="churn-data"
-   AZURE_RAW_DATA_VERSION="3"
-   ```
+**Solution**:
 
-2. Verify the data asset exists and is registered as `uri_folder` type:
-   ```bash
-   az ml data show --name churn-data --version 3 --resource-group <rg> --workspace-name <ws>
-   ```
+1. Verify `config.env` has correct `DATA_ASSET_FULL` and `DATA_VERSION`
+2. Verify data asset exists: `az ml data show --name <name> --version <version>`
+3. Register data asset if missing (see [Registering Data Asset](#registering-data-asset))
 
-3. If the data asset doesn't exist, register it:
-   ```bash
-   az ml data upload \
-     --name churn-data \
-     --version 3 \
-     --path data/ \
-     --type uri_folder \
-     --resource-group <rg> \
-     --workspace-name <ws>
-   ```
+### MLflow Errors
 
-**Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`. If the file is missing or variables are not set, they will fall back to defaults (`bank-churn-raw` version 1).
+#### `mlflow.exceptions.MlflowException: Cannot start run with ID ...`
+
+**Cause**: Trying to start a new MLflow run when Azure ML already has one active
+
+**Solution**: Code automatically handles this by checking for active run (see [MLflow Integration](#mlflow-integration))
+
+#### `API request to endpoint /api/2.0/mlflow/logged-models failed with error code 404`
+
+**Cause**: Azure ML doesn't support MLflow model registry API
+
+**Solution**: Models are saved as pickle files to outputs directory (handled automatically)
+
+#### `azureml_artifacts_builder() takes from 0 to 1 positional arguments but 2 were given`
+
+**Cause**: Azure ML's MLflow artifact APIs have different signatures
+
+**Solution**: Use `mlflow.log_artifact(file_path)` without artifact_path (handled automatically)
+
+### HPO Errors
+
+#### `sklearn.utils._param_validation.InvalidParameterError: The 'min_samples_split' parameter must be an int in the range [2, inf)`
+
+**Cause**: Random Forest search space includes `min_samples_split: [1, 2, ...]` which violates sklearn's requirement
+
+**Solution**: Ensure `min_samples_split >= 2` in `configs/hpo.yaml`:
+
+```yaml
+search_space:
+  rf:
+    min_samples_split: [2, 5, 10]  # Never use 1
+```
+
+#### XGBoost models not being trained in HPO
+
+**Cause**: XGBoost not included in search space or `model_type` filtering not working
+
+**Solution**: Ensure `xgboost` is included in `configs/hpo.yaml::search_space`
+
+#### Logistic Regression being trained multiple times with default configurations
+
+**Cause**: Logistic Regression included in search space but has no hyperparameters (`logreg: {}`)
+
+**Solution**: Remove from search space or add hyperparameters to optimize:
+
+```yaml
+search_space:
+  # logreg: {}  # Commented out - no hyperparameters to optimize
+  rf: ...
+  xgboost: ...
+```
+
+#### Models receiving mismatching hyperparameters
+
+**Cause**: Hyperparameters not filtered by `model_type`
+
+**Solution**: Code automatically filters hyperparameters (see [Model Type Filtering](#model-type-filtering))
 
 ---
 
 ## Best Practices
 
-### 1. Always Test Locally First
+### 1. Test Locally First
 
-Before running on Azure ML, test the training script locally:
+Before running on Azure ML, test locally:
+
 ```bash
 python src/train.py --data data/processed --experiment-name test
-# Models are determined from configs/train.yaml
 ```
 
 ### 2. Monitor Pipeline Jobs
 
-Use Azure ML Studio to monitor pipeline execution:
+Use Azure ML Studio to:
+
 - Check each step's logs
 - Verify data access
 - Monitor MLflow metrics
 
 ### 3. Version Control
 
-- Tag Docker images with versions
+- Tag Docker images with versions (not `latest`)
 - Use versioned data assets
 - Keep track of environment configurations
 
@@ -529,26 +611,22 @@ Use Azure ML Studio to monitor pipeline execution:
 - Use early stopping in HPO to save resources
 - Clean up old jobs and artifacts periodically
 
-### 5. Error Handling
-
-The code includes graceful error handling for Azure ML MLflow limitations:
-- Models are saved even if MLflow artifact logging fails
-- Active run detection prevents conflicts
-- Fallback mechanisms for model loading
-
-### 6. Debugging Tips
+### 5. Debugging Tips
 
 **Check compute node logs**:
+
 ```bash
 az ml job download --name <job-name> --download-path logs/
 ```
 
 **Verify environment variables**:
+
 ```bash
 az ml job show --name <job-name> --query environment_variables
 ```
 
 **Test MLflow connection**:
+
 ```python
 import mlflow
 print(mlflow.get_tracking_uri())
@@ -559,66 +637,33 @@ print(mlflow.active_run())
 
 ## Quick Reference
 
-### Rebuild Docker Image
+### Run Pipelines
+
 ```bash
-# Build locally
-docker build -t bank-churn:latest .
-
-# Tag and push to ACR
-docker tag bank-churn:latest <your-acr-name>.azurecr.io/bank-churn:latest
-docker push <your-acr-name>.azurecr.io/bank-churn:latest
-
-# Update environment.yml with new image tag if needed, then re-register
-az ml environment create --file aml/environments/environment.yml \
-  --resource-group <resource-group> \
-  --workspace-name <workspace-name>
-```
-
-### Run Regular Pipeline
-```bash
+# Regular training pipeline
 python run_pipeline.py
-```
-**Note**: The script automatically loads `config.env` for Azure ML configuration.
 
-### Run HPO Pipeline
-```bash
+# HPO pipeline
 python run_hpo.py
 ```
-**Note**: The script automatically loads `config.env` for Azure ML configuration.
+
+**Note**: Both scripts automatically load `config.env` for Azure ML configuration.
 
 ### Check Job Status
+
 ```bash
 az ml job show --name <job-name> --resource-group <rg> --workspace-name <ws> --query status
-```
-
-### List Child Jobs
-```bash
 az ml job list --parent-job-name <parent-job> --resource-group <rg> --workspace-name <ws>
-```
-
-### Download Job Logs
-```bash
 az ml job download --name <job-name> --resource-group <rg> --workspace-name <ws> --download-path logs/
 ```
 
----
+### Docker Commands
 
-## Additional Resources
+```bash
+# Build
+docker build -t bank-churn:1 .
 
-- [Azure ML Documentation](https://docs.microsoft.com/azure/machine-learning/)
-- [MLflow with Azure ML](https://docs.microsoft.com/azure/machine-learning/how-to-use-mlflow)
-- [Azure ML Python SDK v2](https://docs.microsoft.com/python/api/azure-ai-ml/azure.ai.ml)
-- [Troubleshooting Azure ML](https://docs.microsoft.com/azure/machine-learning/how-to-troubleshoot-jobs)
-
----
-
-**Last Updated**: 2025-01-13
-**Maintained By**: MLOps Team
-
----
-
-## Recent Fixes (2025-01-13)
-
-1. **Data Asset Configuration**: Fixed `run_pipeline.py` and `run_hpo.py` to explicitly load `config.env` instead of relying on default `.env` file
-2. **Python 3.9 Type Hints**: Replaced `|` union syntax with `Optional[...]` for Python 3.9 compatibility in `model_utils.py` and `training.py`
-
+# Tag and push
+docker tag bank-churn:1 <your-acr-name>.azurecr.io/bank-churn:1
+docker push <your-acr-name>.azurecr.io/bank-churn:1
+```
