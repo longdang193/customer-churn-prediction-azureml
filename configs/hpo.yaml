@@ -1,72 +1,51 @@
-# Hyperparameter Optimization (HPO) Configuration
-# Used by notebooks/hpo_manual_trials.ipynb for manual sweeps
-# Uncomment the section you want to use (test or production)
+# Hyperparameter Optimization (HPO) configuration
+# Used by notebooks/hpo_manual_trials.ipynb to submit SweepJobs
 
-# TEST CONFIGURATION - Quick runs for validation
-# Uncomment this section for testing, comment out production section below
-# Primary optimization metric and direction
-metric: "f1"           # e.g., f1, roc_auc, recall, precision, accuracy
-mode: "max"            # "max" or "min"
+experiment_name: "manual-hpo-sweep"
+sweep_display_name: "manual-hpo-sweep"
 
-# Budget configuration (small for testing)
+# Primary optimization objective
+metric: "f1"                    # e.g., f1, roc_auc, recall, precision, accuracy
+mode: "max"                     # "max" or "min"
+sampling_algorithm: "random"    # Options: "random", "grid", "bayesian"
+
 budget:
-  max_trials: 2           # Small number for quick testing
-  max_concurrent: 2       # Limit concurrent trials
+  max_trials: 2                 # Per-model sweep limit (each model gets up to 2 trials)
+  max_concurrent: 2             # Per-model parallelism (each sweep can run up to 2 trials at once)
 
-# Early stopping configuration
+timeouts:
+  total_minutes: 180            # Overall sweep timeout (omit for unlimited)
+  trial_minutes: 45             # Per-trial timeout (omit for unlimited)
+
 early_stopping:
-  enabled: false         # Disabled for test runs
-  patience: 2            # Number of trials to wait before stopping
+  enabled: true
+  policy: "bandit"              # Currently only "bandit" is supported
+  evaluation_interval: 2        # How often (in trials) to evaluate early termination
+  slack_factor: 0.1             # Allowance before terminating underperforming trials
 
-# Search space for HPO (smaller for testing)
-# model_type is treated as a categorical hyperparameter - each trial trains only one model
 search_space:
-  # Model types to optimize (at least one required)
-  # logreg: {}  # Commented out - no hyperparameters to optimize
-  rf:         # Random Forest
-    n_estimators: [100, 200]     # tree count
-    max_depth: [6, 10]           # depth limits
-    min_samples_split: [2, 5]    # split thresholds (must be >= 2)
-    min_samples_leaf: [1, 2]     # leaf thresholds
-  # xgboost:  # XGBoost hyperparameter search space
-  #   n_estimators: [100, 200]
-  #   max_depth: [3, 6]
-  #   learning_rate: [0.05, 0.1]
+  model_types: ["rf", "xgboost"]  # Ordered list of models to explore
+  rf:
+    n_estimators: [100, 200, 300]
+    max_depth: [6, 10]
+    min_samples_split: [2, 5]
+    min_samples_leaf: [1, 2]
+  xgboost:
+    n_estimators: [100, 200]
+    max_depth: [3, 6]
+    learning_rate: [0.05, 0.1]
+    subsample: [0.6, 0.8, 1.0]
+    colsample_bytree: [0.6, 0.8, 1.0]
 
-# Sampling algorithm for HyperDrive
-sampling_algorithm: "random"  # Options: "random", "grid", "bayesian"
-
-# PRODUCTION CONFIGURATION - Comprehensive optimization
-# Uncomment this section for production, comment out test section above
-# metric: "f1"           # e.g., f1, roc_auc, recall, precision, accuracy
-# mode: "max"            # "max" or "min"
-# 
-# # Budget configuration (larger for production)
+# Example production-scale settings (uncomment/tweak as needed)
 # budget:
-#   max_trials: 20          # More trials for better optimization
-#   max_concurrent: 4       # More parallel trials
-# 
-# # Early stopping configuration
+#   max_trials: 30
+#   max_concurrent: 4
+# timeouts:
+#   total_minutes: 360
+#   trial_minutes: 60
 # early_stopping:
-#   enabled: true          # Enabled for production runs
-#   patience: 5            # More patience for production runs
-# 
-# # Search space for HPO (comprehensive)
-# # model_type is treated as a categorical hyperparameter - each trial trains only one model
-# search_space:
-#   # Model types to optimize (at least one required)
-#   # logreg: {}  # Commented out - no hyperparameters to optimize
-#   rf:         # Random Forest
-#     n_estimators: [50, 100, 200, 300]     # Wider range
-#     max_depth: [4, 6, 8, 10, null]         # More depth options including unlimited
-#     min_samples_split: [2, 5, 10]         # More split options
-#     min_samples_leaf: [1, 2, 4]           # More leaf options
-#   xgboost:  # XGBoost hyperparameter search space
-#     n_estimators: [50, 100, 200, 300]
-#     max_depth: [3, 4, 5, 6, 7]
-#     learning_rate: [0.01, 0.05, 0.1, 0.2]
-#     subsample: [0.6, 0.8, 1.0]
-#     colsample_bytree: [0.6, 0.8, 1.0]
-# 
-# # Sampling algorithm for HyperDrive
-# sampling_algorithm: "random"  # Options: "random", "grid", "bayesian"
+#   enabled: true
+#   policy: "bandit"
+#   evaluation_interval: 3
+#   slack_factor: 0.15
