@@ -6,7 +6,9 @@ from typing import Any, Dict
 import yaml
 from azure.ai.ml.sweep import Choice
 
-CONFIG_PATH = Path("configs/hpo.yaml")
+# Resolve relative to project root so the module works from any CWD (e.g., notebooks/)
+PROJECT_ROOT = Path(__file__).resolve().parents[0]
+CONFIG_PATH = PROJECT_ROOT / "configs" / "hpo.yaml"
 
 
 def load_hpo_config() -> Dict[str, Any]:
@@ -79,7 +81,7 @@ def build_parameter_space(search_space: Dict[str, Any]) -> Dict[str, Choice]:
             parameter_space["xgboost_colsample_bytree"] = to_choice(xgboost_space["colsample_bytree"])
 
     if len(parameter_space) == 1:  # Only model_type, no hyperparameters
-        raise ValueError("No hyperparameters found in search space. Check configs/hpo.yaml::search_space")
-    
+        raise ValueError(
+            "No hyperparameters found in search space. Check configs/hpo.yaml::search_space"
+        )
     return parameter_space
-

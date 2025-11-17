@@ -291,6 +291,39 @@ The scripts use environment variables (with defaults):
 - `AZURE_ACR_NAME` (optional: if set, creates ACR during setup)
 - `ACR_SKU` (default: `Basic` - options: Basic, Standard, Premium)
 
+### Create a Compute Instance for Notebooks
+
+The `notebooks/hpo_manual_trials.ipynb` workflow is designed to run from an **Azure ML compute instance** (not the auto-scaling compute cluster). Create one after the workspace is ready:
+
+**Linux/Mac:**
+
+```bash
+COMPUTE_INSTANCE_NAME="${AZURE_COMPUTE_INSTANCE_NAME:-ci-notebooks}"
+
+az ml compute create \
+  --name "$COMPUTE_INSTANCE_NAME" \
+  --type computeinstance \
+  --resource-group "${AZURE_RESOURCE_GROUP:-rg-churn-ml-project}" \
+  --workspace-name "${AZURE_WORKSPACE_NAME:-churn-ml-workspace}" \
+  --size "${COMPUTE_INSTANCE_SIZE:-Standard_DS3_v2}"
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$computeInstanceName = $env:AZURE_COMPUTE_INSTANCE_NAME
+if (-not $computeInstanceName) { $computeInstanceName = "ci-notebooks" }
+
+az ml compute create `
+  --name $computeInstanceName `
+  --type computeinstance `
+  --resource-group $env:AZURE_RESOURCE_GROUP `
+  --workspace-name $env:AZURE_WORKSPACE_NAME `
+  --size ${env:COMPUTE_INSTANCE_SIZE:-"Standard_DS3_v2"}
+```
+
+After the compute instance reaches the `Succeeded` state, open Azure ML Studio → **Compute → Compute instances**, start it if stopped, and launch Jupyter/VS Code from there to run the notebook. The instance’s managed identity provides seamless authentication for the Azure ML SDK.
+
 ### Create Data Asset
 
 After setting up the workspace, create a data asset from your local dataset:

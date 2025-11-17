@@ -1,5 +1,5 @@
 # Hyperparameter Optimization (HPO) Configuration
-# Used by run_hpo.py for HyperDrive sweeps
+# Used by notebooks/hpo_manual_trials.ipynb for manual sweeps
 # Uncomment the section you want to use (test or production)
 
 # TEST CONFIGURATION - Quick runs for validation
@@ -10,7 +10,7 @@ mode: "max"            # "max" or "min"
 
 # Budget configuration (small for testing)
 budget:
-  max_trials: 3           # Small number for quick testing
+  max_trials: 2           # Small number for quick testing
   max_concurrent: 2       # Limit concurrent trials
 
 # Early stopping configuration

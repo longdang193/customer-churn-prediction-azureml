@@ -13,6 +13,9 @@ MIN_NODES="${MIN_NODES:-0}"
 MAX_NODES="${MAX_NODES:-2}"
 ACR_NAME="${AZURE_ACR_NAME:-}"
 ACR_SKU="${ACR_SKU:-Basic}"
+COMPUTE_INSTANCE_NAME="${AZURE_COMPUTE_INSTANCE_NAME:-ci-notebooks}"
+COMPUTE_INSTANCE_SIZE="${COMPUTE_INSTANCE_SIZE:-Standard_DS2_v2}"
+CREATE_COMPUTE_INSTANCE="${CREATE_COMPUTE_INSTANCE:-true}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -79,6 +82,28 @@ create_compute_cluster() {
     fi
 }
 
+create_compute_instance() {
+    if [[ "${CREATE_COMPUTE_INSTANCE,,}" == "false" ]]; then
+        print_warning "CREATE_COMPUTE_INSTANCE=false, skipping compute instance creation."
+        return
+    fi
+
+    if [ -z "$COMPUTE_INSTANCE_NAME" ]; then
+        print_warning "AZURE_COMPUTE_INSTANCE_NAME not set. Skipping compute instance creation."
+        return
+    fi
+
+    print_info "Creating compute instance: $COMPUTE_INSTANCE_NAME"
+    if az ml compute show --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" --name "$COMPUTE_INSTANCE_NAME" &> /dev/null; then
+        print_warning "Compute instance already exists"
+        return
+    fi
+
+    az ml compute create --resource-group "$RESOURCE_GROUP" --workspace-name "$WORKSPACE_NAME" \
+        --name "$COMPUTE_INSTANCE_NAME" --type computeinstance --size "$COMPUTE_INSTANCE_SIZE"
+    print_info "Compute instance created. Start it from Azure ML Studio before launching notebooks."
+}
+
 create_acr() {
     if [ -z "$ACR_NAME" ]; then
         print_warning "AZURE_ACR_NAME not set. Skipping ACR creation."
@@ -102,6 +127,9 @@ display_info() {
     echo "Workspace: $WORKSPACE_NAME"
     echo "Location: $LOCATION"
     echo "Compute Cluster: $COMPUTE_CLUSTER_NAME ($MIN_NODES-$MAX_NODES nodes)"
+    if [[ "${CREATE_COMPUTE_INSTANCE,,}" != "false" ]]; then
+        echo "Compute Instance: ${COMPUTE_INSTANCE_NAME:-<not set>} (${COMPUTE_INSTANCE_SIZE})"
+    fi
     if [ -n "$ACR_NAME" ]; then
         echo "ACR: $ACR_NAME ($ACR_NAME.azurecr.io)"
         echo "  - AcrPull role automatically granted to compute managed identity"
@@ -128,6 +156,7 @@ main() {
     # Create ACR BEFORE compute cluster so AcrPull role is automatically granted
     create_acr
     create_compute_cluster
+    create_compute_instance
     echo ""
     display_info
     print_info "Setup completed successfully!"

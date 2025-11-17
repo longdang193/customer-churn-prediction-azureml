@@ -423,6 +423,165 @@ The output should show:
     - **MLflow**: View runs, metrics, parameters, and artifacts (if MLflow tracking is configured)
     - **Model artifacts**: Check that models are saved to outputs directory
 
+### Step 13: Production Workflow - Run Pipeline with Optimized Hyperparameters
+
+After successfully testing the pipeline, follow this workflow for production runs:
+
+#### 1. Run Hyperparameter Optimization (First Time or When Retuning)
+
+**1.1. Configure HPO budget** in `configs/hpo.yaml`:
+
+```yaml
+budget:
+  max_trials: 20  # Increase for production (was 2-3 for testing)
+  max_concurrent: 4  # Parallel trials
+```
+
+**1.2. Run HPO sweep**:
+
+```bash
+python run_hpo.py
+```
+
+**1.3. Monitor HPO progress**:
+
+- Check Azure ML Studio for sweep job status
+- View MLflow experiment to see trial results in real-time
+- Wait for all trials to complete (may take 30-60 minutes depending on budget)
+
+**1.4. Get parent run ID**:
+
+After the sweep completes, note the parent run ID from:
+
+- Azure ML Studio job output
+- MLflow experiment view
+- Or from the job name printed when you ran `run_hpo.py`
+
+#### 2. Extract Best Hyperparameters
+
+**2.1. Extract and update config**:
+
+```bash
+# Replace <PARENT_RUN_ID> with the actual parent run ID from HPO sweep
+python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
+```
+
+This script:
+
+- Finds the best trial from the HPO sweep (based on primary metric, e.g., `f1`)
+- Extracts the best model type and hyperparameters
+- Automatically updates `configs/train.yaml` with:
+  - `training.models`: Set to `[best_model_type]` (e.g., `[xgboost]`)
+  - `training.hyperparameters.<model_type>`: Updated with best hyperparameters
+
+**2.2. Verify updated config**:
+
+```bash
+# Check that configs/train.yaml was updated
+cat configs/train.yaml
+```
+
+You should see:
+
+- `models: [best_model_type]` (only the best model)
+- Updated hyperparameters for that model
+
+#### 3. Run Production Training Pipeline
+
+**3.1. Run pipeline with optimized hyperparameters**:
+
+```bash
+python run_pipeline.py
+```
+
+This will:
+
+- Use the updated `configs/train.yaml` with best hyperparameters
+- Train only the best model type (faster, more efficient)
+- Produce production-ready model artifacts
+
+**3.2. Monitor training job**:
+
+- Check Azure ML Studio for job status
+- View MLflow run for metrics and artifacts
+- Wait for job completion (typically 5-15 minutes)
+
+**3.3. Get model artifacts**:
+
+After completion, model artifacts are available:
+
+- **Azure ML Studio**: Job outputs → `model_output` folder
+- **MLflow**: Run artifacts (if MLflow tracking enabled)
+- Models are saved as pickle files and can be downloaded or registered
+
+#### 4. Use Trained Models
+
+**4.1. Download models locally** (if needed):
+
+```bash
+# Get job name from Azure ML Studio or from the output of run_pipeline.py
+JOB_NAME="<job-name>"
+az ml job download --name $JOB_NAME --output-dir ./models
+```
+
+**4.2. Register model in Azure ML** (for deployment):
+
+```bash
+# Register the model from job outputs
+az ml model create \
+  --name churn-prediction-model \
+  --version 1 \
+  --path azureml://jobs/$JOB_NAME/outputs/model_output \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name>
+```
+
+**4.3. Use model for inference**:
+
+- Models are logged with MLflow and support `mlflow.pyfunc` deployment
+- Can be deployed to Azure ML online endpoints
+- Can be loaded locally: `mlflow.pyfunc.load_model("runs:/<run-id>/model")`
+
+#### 5. Iterate and Improve
+
+**5.1. Monitor model performance**:
+
+- Track metrics in MLflow over time
+- Compare different training runs
+- Monitor production model performance (if deployed)
+
+**5.2. Retrain when needed**:
+
+- **Regular retraining**: Run `python run_pipeline.py` periodically with updated data
+- **Re-optimize**: Run HPO again if:
+  - Data distribution changes significantly
+  - Model performance degrades
+  - New features are added
+  - Business requirements change
+
+**5.3. Update data asset** (if using new data):
+
+```bash
+# Create new version of data asset
+python setup/create_data_asset.py
+
+# Update DATA_VERSION in config.env
+# Then run pipeline again
+python run_pipeline.py
+```
+
+#### Typical Production Workflow Summary
+
+1. **Initial Setup**: Run HPO → Extract best params → Run production pipeline
+2. **Regular Retraining**: Update data → Run production pipeline (skip HPO)
+3. **Periodic Re-optimization**: Run HPO → Extract best params → Run production pipeline
+
+**Time Estimates**:
+
+- HPO sweep: 30-60 minutes (depending on `max_trials`)
+- Production training: 5-15 minutes
+- Total initial setup: ~1-2 hours
+
 ---
 
 ## Pipeline Entry Points
@@ -451,11 +610,17 @@ The output should show:
 
 ### Typical Workflow
 
+See [Step 13: Production Workflow](#step-13-production-workflow---run-pipeline-with-optimized-hyperparameters) for detailed instructions.
+
+**Quick Summary**:
+
 1. Run `run_hpo.py` to find best hyperparameters (uses `hpo.yaml` component)
 2. Extract best hyperparameters and update config: `python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>`
    - This automatically updates `configs/train.yaml` with best model and hyperparameters
    - Sets `models: [best_model]` to train only the best model
 3. Run `run_pipeline.py` for quick training with optimized hyperparameters (uses `train.yaml` component)
+
+**For subsequent retraining**: Simply run `run_pipeline.py` with updated data (skip HPO unless re-optimization is needed).
 
 ---
 

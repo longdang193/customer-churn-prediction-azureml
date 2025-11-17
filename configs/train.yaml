@@ -3,8 +3,9 @@
 # 
 # IMPORTANT: This file should contain ONLY the best model from HPO results
 # Workflow:
-#   1. Run HPO (run_hpo.py) to find best model and hyperparameters
-#   2. Extract best hyperparameters and update this file (extract_best_params.py)
+#   1. Run HPO via notebooks/hpo_manual_trials.ipynb on an Azure ML compute instance
+#      to find the best model and hyperparameters
+#   2. Transfer the best hyperparameters into this file (manually or with extract_best_params.py)
 #      This automatically sets: (a) best model only, (b) best hyperparameters
 #   3. Run training pipeline (run_pipeline.py) to train the best model
 #
