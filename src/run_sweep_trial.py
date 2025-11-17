@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 from typing import List
 
-# Mirror the hyperparameter keys defined in hpo_utils.build_parameter_space.
-HYPERPARAM_KEYS: List[str] = [
+# Model-specific hyperparameter keys (with model prefix)
+MODEL_HYPERPARAM_KEYS: List[str] = [
     "rf_n_estimators",
     "rf_max_depth",
     "rf_min_samples_split",
     "rf_min_samples_leaf",
+    "rf_max_features",
     "logreg_C",
     "logreg_solver",
     "xgboost_n_estimators",
@@ -24,13 +25,29 @@ HYPERPARAM_KEYS: List[str] = [
     "xgboost_colsample_bytree",
 ]
 
+# Training-level parameter keys (no model prefix)
+TRAINING_PARAM_KEYS: List[str] = [
+    "use_smote",
+    "class_weight",
+    "random_state",
+]
+
+# All hyperparameter keys
+HYPERPARAM_KEYS: List[str] = MODEL_HYPERPARAM_KEYS + TRAINING_PARAM_KEYS
+
 
 def _format_override_key(raw_key: str) -> str:
-    """Convert CLI-friendly keys (e.g., rf_n_estimators) to train.py format (rf.n_estimators)."""
+    """Convert CLI-friendly keys to train.py format.
+    
+    - Model-specific: rf_n_estimators -> rf.n_estimators
+    - Training-level: use_smote -> use_smote (no change)
+    """
+    # Check if it's a model-specific parameter
     for model_prefix in ("rf", "logreg", "xgboost"):
         expected_prefix = f"{model_prefix}_"
         if raw_key.startswith(expected_prefix):
             return f"{model_prefix}.{raw_key[len(expected_prefix):]}"
+    # Training-level parameters are passed as-is
     return raw_key
 
 

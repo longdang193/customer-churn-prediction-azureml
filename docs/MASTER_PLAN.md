@@ -10,8 +10,7 @@ This document outlines the plan and structure for building the Bank Customer Chu
 │   ├── components/
 │   │   ├── data_prep.yaml
 │   │   ├── extract_best_params.yaml
-│   │   ├── train.yaml          # Regular training component (fixed hyperparameters)
-│   │   └── hpo.yaml            # HPO training component (hyperparameter sweeps)
+│   │   └── train.yaml          # Regular training component (fixed hyperparameters)
 │   └── environments/
 │       └── environment.yml     # Azure ML environment definition (Docker image reference)
 ├── configs/
@@ -29,7 +28,8 @@ This document outlines the plan and structure for building the Bank Customer Chu
 │   ├── python_setup.md
 │   └── setup_guide.md
 ├── notebooks/
-│   └── eda.ipynb               # Exploratory data analysis
+│   ├── eda.ipynb               # Exploratory data analysis
+│   └── hpo_manual_trials.ipynb # Manual HPO sweep orchestration in Azure ML
 ├── setup/
 │   ├── create_data_asset.py    # Script to create Azure ML data assets
 │   ├── setup.sh                # Bash script for Azure ML resource setup
@@ -53,7 +53,6 @@ This document outlines the plan and structure for building the Bank Customer Chu
 ├── config.env.example          # Example environment configuration template
 ├── Dockerfile                  # Docker image definition
 ├── hpo_utils.py                # Hyperparameter optimization utilities
-├── run_hpo.py                  # HPO pipeline orchestration script
 ├── run_pipeline.py             # Regular training pipeline orchestration script
 ├── README.md                   # Project overview
 ├── requirements.in             # Core dependencies (source)
@@ -114,7 +113,7 @@ See [[setup/README.md]].
    - `AZURE_ACR_NAME`: Azure Container Registry name (optional, for Docker images)
    - `DATA_ASSET_FULL`: Name of registered data asset (used by pipeline scripts)
    - `DATA_VERSION`: Version of data asset
-   - **Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env` and use `get_data_asset_config()` to get data asset configuration
+   - **Note**: `run_pipeline.py` and `notebooks/hpo_manual_trials.ipynb` both load `config.env` (directly or via helper functions) to resolve Azure ML credentials and data asset metadata.
 
 **Quick Setup**: Use the setup script to create all resources in the correct order:
 
@@ -168,16 +167,15 @@ See [[setup/README.md]].
 4. **Create `hpo_utils.py`**: Utility functions for HPO (loads configs, builds parameter space)
 5. **Update Scripts**: Ensure scripts pull defaults from config but remain overrideable via CLI arguments
 
-### Step 7: Create Pipeline Orchestration Scripts
+### Step 7: Create Pipeline Orchestration Paths
 
-1. **Create `run_hpo.py`**: HPO pipeline with HyperDrive sweep
-    - Uses `hpo_utils.py` to load HPO config from `configs/hpo.yaml`
-    - Uses `aml/components/hpo.yaml` component for training
-    - Each trial trains one model type (categorical hyperparameter) with sampled hyperparameters
-    - Automatically loads `config.env` for Azure ML configuration
-    - Use for: First-time optimization, exploring search spaces
+1. **`notebooks/hpo_manual_trials.ipynb`**: Notebook-driven HPO orchestration
+    - Imports `hpo_utils.py` to load `configs/hpo.yaml` and construct the search space
+    - Builds Azure ML sweep jobs per model type and wires them to `src/run_sweep_trial.py`, which invokes `train.py` with `--set model.param=value`
+    - Handles data asset inputs, compute selection, and early stopping policies directly inside the notebook
+    - Preferred workflow for launching sweeps today (run cells sequentially to submit/monitor jobs)
 
-2. **Create `run_pipeline.py`**: Fixed-hyperparameter training pipeline
+2. **`run_pipeline.py`**: Fixed-hyperparameter training pipeline
     - Uses `aml/components/train.yaml` component for training
     - Simple pipeline: data_prep → train
     - Models determined from `configs/train.yaml` → `training.models`
@@ -244,8 +242,8 @@ docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
 2. **Create component YAML files**:
     - `aml/components/data_prep.yaml`: Data preprocessing component
     - `aml/components/train.yaml`: Training component for regular training (fixed hyperparameters from config)
-    - `aml/components/hpo.yaml`: Training component for HPO sweeps (accepts hyperparameters as inputs for sweep)
     - `aml/components/extract_best_params.yaml`: Component to extract best hyperparameters from MLflow sweep runs (optional, can be run locally)
+    - *HPO note*: sweep jobs are defined directly inside `notebooks/hpo_manual_trials.ipynb` and call `src/run_sweep_trial.py`, so no dedicated `hpo.yaml` component is required.
 
 ### Step 11: Push Docker Image to ACR and Register Azure ML Environment
 
@@ -409,14 +407,10 @@ The output should show:
 
 2. **Test HPO pipeline** (optional, for hyperparameter optimization):
 
-    ```bash
-    python run_hpo.py
-    ```
-
-    - Uses data asset configured in `config.env`
-    - Runs data prep → HPO sweep using `hpo.yaml` component
-    - Configure budget in `configs/hpo.yaml` (e.g., `max_trials: 2-3` for testing)
-    - Verify sweep job submission in Azure ML Studio
+    1. Open `notebooks/hpo_manual_trials.ipynb` in VS Code / Jupyter.
+    2. Ensure `configs/hpo.yaml` reflects the search space and budgets you want to test (e.g., `max_trials: 2-3` for smoke tests).
+    3. Run the notebook cells sequentially to submit sweeps. The notebook prints job names and Studio URLs for tracking.
+    4. Monitor Azure ML Studio to confirm trials start and finish successfully.
 
 3. **Verify outputs**:
     - **Azure ML Studio**: Check job status, logs, and outputs
@@ -437,25 +431,22 @@ budget:
   max_concurrent: 4  # Parallel trials
 ```
 
-**1.2. Run HPO sweep**:
+**1.2. Submit HPO sweeps via notebook**:
 
-```bash
-python run_hpo.py
-```
+1. Open `notebooks/hpo_manual_trials.ipynb`.
+2. Run the preparation cells (workspace auth, data discovery, config loading).
+3. Execute the sweep configuration cell to build `search_space` definitions sourced from `configs/hpo.yaml`.
+4. Run the submission cell to launch one sweep per `model_type`. Record the printed job names and Studio URLs.
 
 **1.3. Monitor HPO progress**:
 
-- Check Azure ML Studio for sweep job status
-- View MLflow experiment to see trial results in real-time
-- Wait for all trials to complete (may take 30-60 minutes depending on budget)
+- Track sweep status in Azure ML Studio using the URLs provided by the notebook.
+- View MLflow/Studio charts to compare child trials in real time.
+- Wait for all trials to complete (duration depends on `max_trials` and compute availability).
 
 **1.4. Get parent run ID**:
 
-After the sweep completes, note the parent run ID from:
-
-- Azure ML Studio job output
-- MLflow experiment view
-- Or from the job name printed when you ran `run_hpo.py`
+- The submission cell displays the sweep job name (also visible in Studio). Use that as the parent run ID when extracting best parameters.
 
 #### 2. Extract Best Hyperparameters
 
@@ -586,16 +577,14 @@ python run_pipeline.py
 
 ## Pipeline Entry Points
 
-### `run_hpo.py` - Hyperparameter Optimization
+### `notebooks/hpo_manual_trials.ipynb` - Hyperparameter Optimization
 
-- Runs HyperDrive sweep to find best hyperparameters
-- Uses `aml/components/hpo.yaml` component for training
-- Loads HPO configuration from `configs/hpo.yaml`
-- Each trial trains one model type (from search space) with sampled hyperparameters
-- Efficient: 1 model per trial (reduces compute cost)
-- Automatically loads `config.env` for Azure ML configuration
-- **Use when**: First-time optimization, exploring new search spaces
-- **Outputs**: Best hyperparameters and model type from sweep results (logged to MLflow)
+- End-to-end notebook workflow for building and submitting Azure ML sweeps
+- Loads `configs/hpo.yaml` via `hpo_utils.py` to construct per-model search spaces
+- Uses `src/run_sweep_trial.py` → `train.py` to run each sampled configuration with `--set model.param=value`
+- Provides interactive monitoring output (job names, Studio links, chosen hyperparameters)
+- **Use when**: First-time optimization, tuning new search spaces, or validating sweep fixes
+- **Outputs**: Azure ML sweep jobs with logged metrics/params per child run
 
 ### `run_pipeline.py` - Fixed-Hyperparameter Training
 
@@ -614,7 +603,7 @@ See [Step 13: Production Workflow](#step-13-production-workflow---run-pipeline-w
 
 **Quick Summary**:
 
-1. Run `run_hpo.py` to find best hyperparameters (uses `hpo.yaml` component)
+1. Use `notebooks/hpo_manual_trials.ipynb` to find best hyperparameters (uses Azure ML sweeps + `run_sweep_trial.py`)
 2. Extract best hyperparameters and update config: `python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>`
    - This automatically updates `configs/train.yaml` with best model and hyperparameters
    - Sets `models: [best_model]` to train only the best model

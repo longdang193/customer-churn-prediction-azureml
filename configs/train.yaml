@@ -1,97 +1,23 @@
-# Training Configuration
-# Used by run_pipeline.py and train.py for model training
-# 
-# IMPORTANT: This file should contain ONLY the best model from HPO results
-# Workflow:
-#   1. Run HPO via notebooks/hpo_manual_trials.ipynb on an Azure ML compute instance
-#      to find the best model and hyperparameters
-#   2. Transfer the best hyperparameters into this file (manually or with extract_best_params.py)
-#      This automatically sets: (a) best model only, (b) best hyperparameters
-#   3. Run training pipeline (run_pipeline.py) to train the best model
-#
-# Uncomment the section you want to use (test or production)
-
-# TEST CONFIGURATION - Quick runs for validation
-# Uncomment this section for testing, comment out production section below
 training:
-  # Models to train - MUST be only 1 model (the best from HPO)
-  # After HPO completes, update this to the best model found
-  # Available models: logreg (Logistic Regression), rf (Random Forest), xgboost (XGBoost)
   models:
-    - "rf"       # Best model from HPO (update this after HPO completes)
-    # - "xgboost"  # Use if xgboost was the best model from HPO
-    # - "logreg"   # Use if logreg was the best model from HPO
-  
-  # Class imbalance handling
-  class_weight: "balanced"  # Options: "balanced", None, or dict
-  
-  # Random seed for reproducibility
+  - "xgboost"
+  class_weight: "balanced"
   random_state: 42
-  
-  # SMOTE for oversampling (optional)
-  use_smote: false
-  
-  # Hyperparameters for each model
-  # These are used for regular training runs (not HPO)
-  # After HPO, update these with the best hyperparameters found
+  use_smote: "true"
   hyperparameters:
     logreg:
-      C: 1.0              # inverse regularization (higher = less regularization)
-      max_iter: 1000      # iteration cap for convergence
-      solver: "lbfgs"     # preferred solver for L2 penalty
-    
+      C: 1.0
+      max_iter: 1000
+      solver: "lbfgs"
     rf:
-      n_estimators: 100    # number of trees (smaller for testing)
-      max_depth: 6         # limit tree depth (smaller for testing)
-      min_samples_split: 2  # min samples to split internal node
-      min_samples_leaf: 1   # min samples at leaf node
-      max_features: "sqrt"  # features considered per split
-    
+      n_estimators: 100
+      max_depth: 6
+      min_samples_split: 2
+      min_samples_leaf: 1
+      max_features: "sqrt"
     xgboost:
-      n_estimators: 50      # boosting rounds (smaller for testing)
-      max_depth: 4           # depth of each tree (smaller for testing)
-      learning_rate: 0.1     # shrinkage step
-      subsample: 0.8         # row sampling ratio
-      colsample_bytree: 0.8  # column sampling ratio
-
-# PRODUCTION CONFIGURATION - Full training with optimized hyperparameters
-# Uncomment this section for production, comment out test section above
-# training:
-#   # Models to train (for non-HPO runs)
-#   # Available models: logreg (Logistic Regression), rf (Random Forest), xgboost (XGBoost)
-#   models:
-#     - "rf"       # Best model from HPO - MUST be only 1 model (update after HPO completes)
-#     # - "xgboost"  # Use if xgboost was the best model from HPO
-#     # - "logreg"   # Use if logreg was the best model from HPO
-#   
-#   # Class imbalance handling
-#   class_weight: "balanced"  # Options: "balanced", None, or dict
-#   
-#   # Random seed for reproducibility
-#   random_state: 42
-#   
-#   # SMOTE for oversampling (optional)
-#   use_smote: false
-#   
-#   # Hyperparameters for each model
-#   # These are used for regular training runs (not HPO)
-#   # After HPO, update these with the best hyperparameters found
-#   hyperparameters:
-#     logreg:
-#       C: 1.0              # inverse regularization (higher = less regularization)
-#       max_iter: 1000      # iteration cap for convergence
-#       solver: "lbfgs"     # preferred solver for L2 penalty
-#     
-#     rf:
-#       n_estimators: 200    # number of trees (updated from HPO)
-#       max_depth: 10        # limit tree depth (updated from HPO)
-#       min_samples_split: 2  # min samples to split internal node (updated from HPO)
-#       min_samples_leaf: 2   # min samples at leaf node (updated from HPO)
-#       max_features: "sqrt"  # features considered per split
-#     
-#     xgboost:
-#       n_estimators: 100      # boosting rounds
-#       max_depth: 6           # depth of each tree
-#       learning_rate: 0.1     # shrinkage step
-#       subsample: 0.8         # row sampling ratio
-#       colsample_bytree: 0.8  # column sampling ratio
+      n_estimators: 100
+      max_depth: 4
+      learning_rate: 0.1
+      subsample: 1
+      colsample_bytree: 0.8

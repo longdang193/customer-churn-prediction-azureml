@@ -357,6 +357,28 @@ The code automatically filters hyperparameters based on `model_type`:
 
 **Verification**: Check that each trial in Azure ML Studio has a single `model_type` tag and only relevant hyperparameters logged.
 
+### Notebook-Driven HPO Workflow
+
+The project includes a notebook-driven HPO workflow (`notebooks/hpo_manual_trials.ipynb`) that provides:
+
+1. **Manual control**: Submit sweeps per model type with custom configurations
+2. **Result analysis**: Built-in cells to load previous sweeps and analyze best models
+3. **Flexible loading**: Load specific sweep jobs by name or auto-discover from experiment
+
+**Key Features**:
+
+- `load_previous_sweeps()` function to retrieve previous sweep submissions
+- Best model analysis cell that extracts the winning configuration
+- Support for both explicit job names and auto-discovery
+
+**Usage**:
+
+- To submit new sweeps: Configure and run the submission cell
+- To load previous sweeps: Use `load_previous_sweeps()` with `SPECIFIC_SWEEP_JOBS` dictionary or enable `auto_discovery=True`
+- To analyze results: Run the best model analysis cell
+
+**See**: [HPO Sweep Job Errors (Notebook-Driven Workflow)](#hpo-sweep-job-errors-notebook-driven-workflow) for common issues and solutions.
+
 ---
 
 ## Common Errors
@@ -579,6 +601,100 @@ search_space:
 
 **Solution**: Code automatically filters hyperparameters (see [Model Type Filtering](#model-type-filtering))
 
+### HPO Sweep Job Errors (Notebook-Driven Workflow)
+
+#### `run_sweep_trial.py: error: argument --xgboost_max_depth: expected one argument`
+
+**Error Message**:
+
+```text
+Execution failed. User process 'python' exited with status code 2.
+Error: usage: run_sweep_trial.py [-h] --data DATA --model-type MODEL_TYPE ...
+run_sweep_trial.py: error: argument --xgboost_max_depth: expected one argument
+run_sweep_trial.py: error: argument --rf_max_depth: expected one argument
+```
+
+**Cause**: The sweep command in `hpo_manual_trials.ipynb` was incorrectly passing hyperparameter flags as `${{inputs.<param>}}` without values. Azure ML sweep jobs need to reference the search space directly.
+
+**Solution**: In the notebook cell that builds the sweep command, change from:
+
+```python
+command_segments.append(f"--{prefixed_name} ${{{{inputs.{prefixed_name}}}}}")
+```
+
+To:
+
+```python
+command_segments.append(f"--{prefixed_name} ${{{{search_space.{prefixed_name}}}}}")
+```
+
+This allows Azure ML to inject the sampled values from the search space directly into the command.
+
+#### `ValueError: Invalid override format 'rf_n_estimators=100'`
+
+**Error Message**:
+
+```text
+Execution failed. User process 'python' exited with status code 1.
+Error: ValueError: Invalid override format 'rf_n_estimators=100'
+```
+
+**Cause**: The `train.py` script expects hyperparameter overrides in `model.param=value` format (e.g., `rf.n_estimators=100`), but `run_sweep_trial.py` was passing them as `param=value` format (e.g., `rf_n_estimators=100`).
+
+**Solution**: The `run_sweep_trial.py` script includes a `_format_override_key()` function that converts sweep parameter names to the format expected by `train.py`:
+
+- `rf_n_estimators` → `rf.n_estimators`
+- `xgboost_max_depth` → `xgboost.max_depth`
+- `logreg_C` → `logreg.C`
+
+This conversion happens automatically when building the CLI arguments for `train.py`.
+
+**Verification**: Check that `run_sweep_trial.py` includes the formatting function and uses it when building the `--set` arguments.
+
+#### Best model analysis cell returns "No completed trials yet" despite jobs being completed
+
+**Issue**: The analysis cell in `hpo_manual_trials.ipynb` shows "No completed trials yet" even when sweep jobs have finished.
+
+**Cause**: The original implementation relied on `sweep_job.best_trial`, which might not be immediately populated or reliable. The sweep job properties need to be accessed directly.
+
+**Solution**: The cell should access sweep job properties directly:
+
+```python
+best_child_run_id = sweep_job.properties.get("best_child_run_id")
+raw_score = sweep_job.properties.get("score")
+```
+
+Then fetch the child job to retrieve its parameters:
+
+```python
+child_job = ml_client.jobs.get(best_child_run_id)
+params = {k: _coerce(v) for k, v in (getattr(child_job, "parameters", {}) or {}).items()}
+```
+
+**Note**: The `best_child_run_id` and `score` properties are populated by Azure ML when the sweep completes. If these are `None`, the sweep may still be running or failed.
+
+#### `ml_client.jobs.list(experiment_name=experiment_name)` fails with TypeError
+
+**Error Message**:
+
+```text
+TypeError: list() got an unexpected keyword argument 'experiment_name'
+```
+
+**Cause**: The `ml_client.jobs.list()` method does not accept `experiment_name` as a direct argument in the Azure ML SDK v2.
+
+**Solution**: Call `ml_client.jobs.list()` without arguments and filter the results:
+
+```python
+for job in ml_client.jobs.list():
+    if (job.type == "sweep" 
+        and getattr(job, "experiment_name", None) == experiment_name
+        and getattr(job, "display_name", "").startswith(prefix)):
+        # Process matching sweep job
+```
+
+**Note**: The `load_previous_sweeps()` function in `hpo_manual_trials.ipynb` handles this correctly by iterating through all jobs and filtering by attributes.
+
 ---
 
 ## Best Practices
@@ -643,11 +759,14 @@ print(mlflow.active_run())
 # Regular training pipeline
 python run_pipeline.py
 
-# HPO pipeline
+# HPO pipeline (script-based)
 python run_hpo.py
+
+# HPO pipeline (notebook-driven - recommended)
+# Open notebooks/hpo_manual_trials.ipynb and run cells sequentially
 ```
 
-**Note**: Both scripts automatically load `config.env` for Azure ML configuration.
+**Note**: Both scripts automatically load `config.env` for Azure ML configuration. The notebook-driven workflow provides more control and better visibility into sweep results.
 
 ### Check Job Status
 

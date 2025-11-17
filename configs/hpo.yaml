@@ -1,51 +1,92 @@
-# Hyperparameter Optimization (HPO) configuration
-# Used by notebooks/hpo_manual_trials.ipynb to submit SweepJobs
+# TEST CONFIG (quick validation)
+experiment_name: "hpo-test"
+sweep_display_name: "hpo-test"
 
-experiment_name: "manual-hpo-sweep"
-sweep_display_name: "manual-hpo-sweep"
-
-# Primary optimization objective
-metric: "f1"                    # e.g., f1, roc_auc, recall, precision, accuracy
-mode: "max"                     # "max" or "min"
-sampling_algorithm: "random"    # Options: "random", "grid", "bayesian"
+metric: "f1"
+mode: "max"
+sampling_algorithm: "random"
 
 budget:
-  max_trials: 2                 # Per-model sweep limit (each model gets up to 2 trials)
-  max_concurrent: 2             # Per-model parallelism (each sweep can run up to 2 trials at once)
+  max_trials: 2
+  max_concurrent: 2
 
 timeouts:
-  total_minutes: 180            # Overall sweep timeout (omit for unlimited)
-  trial_minutes: 45             # Per-trial timeout (omit for unlimited)
+  total_minutes: 60
+  trial_minutes: 20
 
 early_stopping:
   enabled: true
-  policy: "bandit"              # Currently only "bandit" is supported
-  evaluation_interval: 2        # How often (in trials) to evaluate early termination
-  slack_factor: 0.1             # Allowance before terminating underperforming trials
+  policy: "bandit"
+  evaluation_interval: 2
+  slack_factor: 0.2
 
 search_space:
-  model_types: ["rf", "xgboost"]  # Ordered list of models to explore
+  model_types: ["logreg", "rf", "xgboost"]
+
+  use_smote: ["true"]
+
+  logreg:
+    C: [0.1, 1.0, 10.0]
+    solver: ["lbfgs", "liblinear"]
+
   rf:
-    n_estimators: [100, 200, 300]
-    max_depth: [6, 10]
+    n_estimators: [100, 200]
+    max_depth: [4, 6]
     min_samples_split: [2, 5]
     min_samples_leaf: [1, 2]
-  xgboost:
-    n_estimators: [100, 200]
-    max_depth: [3, 6]
-    learning_rate: [0.05, 0.1]
-    subsample: [0.6, 0.8, 1.0]
-    colsample_bytree: [0.6, 0.8, 1.0]
+    max_features: ["sqrt"]
 
-# Example production-scale settings (uncomment/tweak as needed)
+  xgboost:
+    n_estimators: [50, 100]
+    max_depth: [3, 4]
+    learning_rate: [0.05, 0.1]
+    subsample: [0.8, 1.0]
+    colsample_bytree: [0.6, 0.8]
+
+
+################################################################################
+# PRODUCTION CONFIG (uncomment this block, comment out TEST above)
+################################################################################
+# experiment_name: "hpo-prod"
+# sweep_display_name: "hpo-prod"
+#
+# metric: "f1"
+# mode: "max"
+# sampling_algorithm: "random"
+#
 # budget:
 #   max_trials: 30
 #   max_concurrent: 4
+#
 # timeouts:
 #   total_minutes: 360
 #   trial_minutes: 60
+#
 # early_stopping:
 #   enabled: true
 #   policy: "bandit"
 #   evaluation_interval: 3
 #   slack_factor: 0.15
+#
+# search_space:
+#   model_types: ["logreg", "rf", "xgboost"]
+#
+#   use_smote: ["true", "false"]
+#
+#   logreg:
+#     C: [0.01, 0.1, 1.0, 10.0]
+#     solver: ["lbfgs", "liblinear"]
+#
+#   rf:
+#     n_estimators: [100, 200, 300]
+#     max_depth: [4, 6, 8, 10, null]
+#     min_samples_split: [2, 5, 10]
+#     min_samples_leaf: [1, 2, 4]
+#     max_features: ["sqrt"]
+#
+#   xgboost:
+#     n_estimators: [100, 200, 300]
+#     max_depth: [3, 4, 5, 6]
+#     learning_rate: [0.01, 0.05, 0.1]
+#     subsample: [0.6, 0.8, 1.0]
+#     colsample_bytree: [0.6, 0.8, 1.0]

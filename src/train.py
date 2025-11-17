@@ -47,8 +47,31 @@ def main() -> None:
     training_config = get_config_value(config, 'training', {})
     mlflow_config = get_config_value(mlflow_config, 'mlflow', {})
     
+    # Apply training-level parameter overrides from --set (e.g., use_smote, class_weight, random_state)
+    # These are parameters that don't have a model prefix (unlike model.param=value)
+    from training.hyperparams import parse_override_value
+    training_level_params = ['use_smote', 'class_weight', 'random_state']
+    model_param_overrides = []  # Filter out training-level params for model hyperparams
+    for override in args.set:
+        if '=' in override:
+            try:
+                key, value_str = override.split('=', 1)
+                if key in training_level_params:
+                    # Parse the value (handles booleans, ints, strings, etc.)
+                    parsed_value = parse_override_value(value_str)
+                    training_config[key] = parsed_value
+                else:
+                    # Keep model-specific overrides (model.param=value format)
+                    model_param_overrides.append(override)
+            except (ValueError, AttributeError):
+                # Keep invalid overrides - they'll be handled by apply_param_overrides
+                model_param_overrides.append(override)
+        else:
+            # Keep overrides without '=' (shouldn't happen, but be safe)
+            model_param_overrides.append(override)
+    
     hpo_mode = is_hpo_mode(args.model_type)
-    hyperparams_by_model = prepare_regular_hyperparams(training_config, args.set)
+    hyperparams_by_model = prepare_regular_hyperparams(training_config, model_param_overrides)
     
     models_to_train = determine_models_to_train(hpo_mode, args.model_type, training_config)
     
@@ -58,7 +81,7 @@ def main() -> None:
         class_weight=args.class_weight or get_config_value(training_config, 'class_weight', 'balanced'),
         random_state=args.random_state or get_config_value(training_config, 'random_state', 42),
         experiment_name=args.experiment_name or get_config_value(mlflow_config, 'experiment_name', 'churn-prediction'),
-        use_smote=args.use_smote or get_config_value(training_config, 'use_smote', False),
+        use_smote=args.use_smote or get_config_value(training_config, 'use_smote', True),
         hyperparams_by_model=hyperparams_by_model,
         model_artifact_dir=args.model_artifact_dir,
         parent_run_id_output=args.parent_run_id_output,
