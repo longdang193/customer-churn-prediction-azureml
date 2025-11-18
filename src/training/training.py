@@ -3,16 +3,12 @@
 # Import azureml.mlflow before mlflow to register Azure ML tracking store
 import azureml.mlflow  # noqa: F401
 
-import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
  
 import joblib
 import mlflow
-import mlflow.sklearn
-from mlflow.models import infer_signature
 
 from data import apply_smote, load_prepared_data
 from utils import (
@@ -33,13 +29,15 @@ from .model_utils import (
 JSONDict = Dict[str, Any]
 
 
-def get_pip_requirements() -> list[str]:
-    """Generate pip requirements for MLflow model deployment (local only).
-    
-    Returns:
-        List of package names required for model deployment
-    """
-    return ["mlflow", "scikit-learn", "pandas", "numpy", "xgboost"]
+def _model_artifact_path(model_name: str) -> Path:
+    """Return the intermediate artifact path for a trained model."""
+    base_dir = Path(
+        os.getenv("AZUREML_ARTIFACTS_DIRECTORY")
+        or os.getenv("AZUREML_OUTPUT_DIRECTORY")
+        or "outputs"
+    )
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir / f"{model_name}_model.pkl"
 
 
 def train_model(
@@ -92,23 +90,9 @@ def train_model(
             mlflow.log_metric(f"test_{metric}", value)
         
         artifact_path = f"model_{model_name}"
-        
-        # Save model
-        if is_azure_ml():
-            outputs_dir = os.getenv("AZUREML_ARTIFACTS_DIRECTORY", os.getenv("AZUREML_OUTPUT_DIRECTORY", "/tmp"))
-            model_path = Path(outputs_dir) / f"{model_name}_model.pkl"
-            model_path.parent.mkdir(parents=True, exist_ok=True)
-            joblib.dump(model, model_path)
-            mlflow.set_tag(f"{model_name}_model_file", str(model_path))
-        else:
-            signature = infer_signature(X_test.head(10), model.predict(X_test.head(10)))
-            mlflow.sklearn.log_model(
-                model,
-                artifact_path,
-                pip_requirements=get_pip_requirements(),
-                signature=signature,
-                input_example=X_test.head(1).to_dict(orient="records")[0]
-            )
+        model_path = _model_artifact_path(model_name)
+        joblib.dump(model, model_path)
+        mlflow.set_tag(f"{model_name}_model_file", str(model_path))
         
         return {
             'test_metrics': test_metrics,
@@ -120,7 +104,7 @@ def train_model(
             mlflow.end_run()
 
 
-def train_all_models(
+def train_pipeline_stage(
     data_dir: str,
     models: Iterable[str],
     class_weight: Optional[str],
@@ -131,24 +115,28 @@ def train_all_models(
     model_artifact_dir: Optional[str] = None,
     parent_run_id_output: Optional[str] = None,
 ) -> Dict[str, JSONDict]:
-    """Train a collection of models within a parent MLflow run.
+    """Orchestrate the training stage of the pipeline.
+
+    This function prepares the dataset once, optionally applies SMOTE,
+    spins up the parent MLflow run, loops through each requested model
+    (delegating to ``train_model``), and captures summary artifacts.
     
     Args:
-        data_dir: Directory containing preprocessed data
-        models: Iterable of model names to train
-        class_weight: Class weight strategy
-        random_state: Random seed
-        experiment_name: MLflow experiment name
-        use_smote: Whether to apply SMOTE
-        hyperparams_by_model: Optional dictionary mapping model names to hyperparameters
-        model_artifact_dir: Optional directory to save best model
-        parent_run_id_output: Optional file path to write parent run ID
+        data_dir: Directory containing preprocessed data.
+        models: Iterable of model names to train.
+        class_weight: Class weight strategy.
+        random_state: Random seed for reproducibility.
+        experiment_name: MLflow experiment name for the parent run.
+        use_smote: Whether to apply SMOTE before training.
+        hyperparams_by_model: Optional mapping of model name to overrides.
+        model_artifact_dir: Optional directory to copy the best model into.
+        parent_run_id_output: Optional file path to write the parent run ID.
         
     Returns:
-        Dictionary mapping model names to their training results
+        Dictionary mapping model names to their training results.
         
     Raises:
-        RuntimeError: If no models are successfully trained
+        RuntimeError: If no models are successfully trained.
     """
     is_azure = is_azure_ml()
     started_run = False
@@ -211,31 +199,11 @@ def train_all_models(
         if model_artifact_dir:
             output_dir = Path(model_artifact_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
-            
-            if is_azure:
-                outputs_dir = os.getenv("AZUREML_ARTIFACTS_DIRECTORY", os.getenv("AZUREML_OUTPUT_DIRECTORY", "/tmp"))
-                source_file = Path(outputs_dir) / f"{best_model_name}_model.pkl"
-                dest_file = output_dir / f"{best_model_name}_model.pkl"
-                if source_file.exists():
-                    shutil.copy2(source_file, dest_file)
-                else:
+            source_file = _model_artifact_path(best_model_name)
+            dest_file = output_dir / f"{best_model_name}_model.pkl"
+            if not source_file.exists():
                     raise FileNotFoundError(f"Model file not found: {source_file}")
-            else:
-                model_uri = f"runs:/{best_run_id}/{best_result['artifact_path']}"
-                best_model = mlflow.sklearn.load_model(model_uri)
-                joblib.dump(best_model, output_dir / f"{best_model_name}_model.pkl")
-            
-            # Save metadata
-            parent_run_id = get_run_id(parent_run) if parent_run else os.getenv("MLFLOW_RUN_ID", "unknown")
-            metadata = {
-                "parent_run_id": parent_run_id,
-                "best_model": best_model_name,
-                "best_model_run_id": best_run_id,
-                "artifact_path": best_result['artifact_path'],
-                "metrics": best_metrics,
-            }
-            with open(output_dir / "model_metadata.json", "w") as f:
-                json.dump(metadata, f, indent=2)
+            dest_file.write_bytes(source_file.read_bytes())
         
         return results
     finally:

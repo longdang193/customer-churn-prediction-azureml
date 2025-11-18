@@ -3,13 +3,12 @@
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from training import (
     determine_models_to_train,
     is_hpo_mode,
     prepare_regular_hyperparams,
-    train_all_models,
+    train_pipeline_stage,
 )
 from utils import get_config_value, load_config
 
@@ -75,7 +74,7 @@ def main() -> None:
     
     models_to_train = determine_models_to_train(hpo_mode, args.model_type, training_config)
     
-    train_all_models(
+    train_pipeline_stage(
         data_dir=args.data or 'data/processed',
         models=models_to_train,
         class_weight=args.class_weight or get_config_value(training_config, 'class_weight', 'balanced'),

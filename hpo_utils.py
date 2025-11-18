@@ -31,6 +31,24 @@ def _resolve_model_types(search_space: Dict[str, Any]) -> List[str]:
     return inferred
 
 
+def _filter_nulls(obj: Any) -> Any:
+    """Recursively filter out None/null values from lists in the search space.
+    
+    Azure ML sweep Choice does not accept None/null values.
+    """
+    if isinstance(obj, dict):
+        return {key: _filter_nulls(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        # Filter out None values from lists
+        filtered = [item for item in obj if item is not None]
+        return [_filter_nulls(item) for item in filtered]
+    else:
+        return obj
+
+
 def build_parameter_space(search_space: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the sweep search space exactly as defined in the YAML config."""
-    return search_space
+    """Build the sweep search space from YAML config, filtering out null values.
+    
+    Azure ML sweep Choice does not accept None/null values, so they are removed.
+    """
+    return _filter_nulls(search_space)

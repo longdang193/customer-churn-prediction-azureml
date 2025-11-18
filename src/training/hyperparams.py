@@ -3,7 +3,10 @@
 import ast
 from typing import Any, Dict, Optional
 
+from utils import get_config_value
+
 JSONDict = Dict[str, Any]
+DEFAULT_MODEL_SEQUENCE = ("logreg", "rf", "xgboost")
 
 
 def parse_override_value(value: str) -> Any:
@@ -68,18 +71,8 @@ def is_hpo_mode(model_type: Optional[str] = None) -> bool:
 
 
 def prepare_regular_hyperparams(training_config: Dict[str, Any], param_overrides: list[str]) -> Dict[str, JSONDict]:
-    """Prepare hyperparameters for regular mode (from config + CLI overrides).
-    
-    Args:
-        training_config: Training configuration dictionary
-        param_overrides: List of CLI parameter overrides
-        
-    Returns:
-        Dictionary mapping model names to their hyperparameters
-    """
-    from utils import get_config_value
-    
-    hyperparams_by_model = get_config_value(training_config, 'hyperparameters', {})
+    """Prepare hyperparameters for regular mode (from config + CLI overrides)."""
+    hyperparams_by_model = get_config_value(training_config, "hyperparameters", {})
     if param_overrides:
         hyperparams_by_model = apply_param_overrides(param_overrides, hyperparams_by_model)
     return hyperparams_by_model
@@ -88,21 +81,10 @@ def prepare_regular_hyperparams(training_config: Dict[str, Any], param_overrides
 def determine_models_to_train(
     is_hpo: bool,
     model_type: Optional[str],
-    training_config: Dict[str, Any]
+    training_config: Dict[str, Any],
 ) -> list[str]:
-    """Determine which models to train based on mode.
-    
-    Args:
-        is_hpo: Whether running in HPO mode
-        model_type: Optional model type for HPO
-        training_config: Training configuration dictionary
-        
-    Returns:
-        List of model names to train
-    """
-    from utils import get_config_value
-    
+    """Determine which models to train based on mode."""
     if is_hpo and model_type:
         return [model_type]
-    return get_config_value(training_config, 'models', ['logreg', 'rf'])
+    return get_config_value(training_config, "models", list(DEFAULT_MODEL_SEQUENCE))
 

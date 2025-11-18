@@ -9,7 +9,13 @@ import mlflow
 def is_azure_ml() -> bool:
     """Check if running in Azure ML environment."""
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "")
-    return "azureml" in tracking_uri.lower() if tracking_uri else False
+    if tracking_uri and "azureml" in tracking_uri.lower():
+        return True
+    # Fallback to explicit Azure ML env markers
+    return any(
+        os.getenv(var)
+        for var in ("AZUREML_RUN_ID", "AZUREML_RUN_TOKEN", "AZUREML_RUN_CONFIGURATION")
+    )
 
 
 def get_run_id(run_obj: Any) -> str:

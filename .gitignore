@@ -54,3 +54,6 @@ dist/
 
 # MLflow tracking data
 mlruns/
+
+# Virtual environments
+venv/

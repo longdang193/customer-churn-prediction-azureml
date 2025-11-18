@@ -8,7 +8,6 @@ data_prep component to automatically load CSV files.
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, Any
 
 from azure.identity import DefaultAzureCredential
 from azure.ai.ml import MLClient

@@ -59,7 +59,7 @@ The template also includes optional entries you can customize:
 - `MODEL_NAME`, `EXPERIMENT_NAME`: MLflow experiment and registered model identifiers
 - `ENDPOINT_NAME`, `DEPLOYMENT_NAME`: Names used for online endpoint deployment
 
-**Note**: Both `run_pipeline.py` and `run_hpo.py` automatically load `config.env`, so you don't need to source it manually.
+**Note**: `run_pipeline.py` automatically loads `config.env`, so you don't need to source it manually.
 
 ### 2. Authenticate with Azure
 

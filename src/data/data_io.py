@@ -1,12 +1,16 @@
 """Data loading and artifact saving utilities."""
 
 import json
+import logging
 import pickle
 from pathlib import Path
 from typing import Any, Dict
 
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+
+
+logger = logging.getLogger(__name__)
 
 
 def load_data(path: Path) -> pd.DataFrame:
@@ -22,20 +26,22 @@ def load_data(path: Path) -> pd.DataFrame:
         FileNotFoundError: If no CSV file is found
     """
     path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Data path does not exist: {path}")
     
-    # If it's a directory, load all CSV files and concatenate them
     if path.is_dir():
         csv_files = sorted(path.glob("*.csv"))
         if not csv_files:
-            raise FileNotFoundError(f"No CSV file found in directory: {path}")
+            raise FileNotFoundError(f"No CSV files found in directory: {path}")
         
-        # Load and concatenate all CSV files
-        dataframes = [pd.read_csv(csv_file) for csv_file in csv_files]
-        df = pd.concat(dataframes, ignore_index=True)
-        print(f"Loaded {len(csv_files)} CSV file(s) from {path}: {[f.name for f in csv_files]}")
+        frames = [pd.read_csv(csv_file) for csv_file in csv_files]
+        df = pd.concat(frames, ignore_index=True)
+        logger.info("Loaded %d CSV file(s) from %s", len(csv_files), path)
         return df
     
-    # Single file
+    if path.suffix.lower() != ".csv":
+        raise ValueError(f"Unsupported file type for load_data: {path.suffix}")
+
     return pd.read_csv(path)
 
 
@@ -83,8 +89,13 @@ def save_preprocessed_data(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    X_train.to_csv(output_dir / "X_train.csv", index=False)
-    X_test.to_csv(output_dir / "X_test.csv", index=False)
-    y_train.to_csv(output_dir / "y_train.csv", index=False, header=True)
-    y_test.to_csv(output_dir / "y_test.csv", index=False, header=True)
+    datasets = {
+        "X_train.csv": (X_train, {"index": False}),
+        "X_test.csv": (X_test, {"index": False}),
+        "y_train.csv": (y_train, {"index": False, "header": True}),
+        "y_test.csv": (y_test, {"index": False, "header": True}),
+    }
+
+    for filename, (frame, kwargs) in datasets.items():
+        frame.to_csv(output_dir / filename, **kwargs)
 

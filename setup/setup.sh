@@ -4,7 +4,7 @@
 set -e
 
 # Configuration
-RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-churn-ml-project-2025-11-15}"
+RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-churn-ml-project}"
 LOCATION="${AZURE_LOCATION:-southeastasia}"
 WORKSPACE_NAME="${AZURE_WORKSPACE_NAME:-churn-ml-workspace}"
 COMPUTE_CLUSTER_NAME="${AZURE_COMPUTE_CLUSTER_NAME:-cpu-cluster}"

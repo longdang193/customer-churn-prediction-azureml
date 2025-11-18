@@ -1,6 +1,6 @@
-# HyperDrive Pipeline Guide
+# Pipeline Guide
 
-This guide walks through the churn pipeline when driven entirely by Azure ML HyperDrive. Each script/component plays a specific role from data preparation through scoring.
+This guide walks through the churn prediction pipeline workflow, from data preparation through hyperparameter optimization and production training.
 
 ## 1. Data Preparation (`src/data_prep.py`)
 
@@ -23,84 +23,96 @@ Usage (local parity):
 python src/data_prep.py --config configs/data.yaml --output data/processed
 ```
 
-## 2. HyperDrive Sweep (`run_hpo.py` + `aml/components/hpo.yaml`)
+## 2. Hyperparameter Optimization (Notebook-Driven Workflow)
 
-`run_hpo.py` is the primary entry point. It:
+The HPO workflow is managed through `notebooks/hpo_manual_trials.ipynb`, which provides:
 
-1. Automatically loads Azure ML configuration from `config.env`.
-2. Reads the HyperDrive configuration from `configs/hpo.yaml` (metric, mode, budget, search space, early stopping).
-3. Builds a DSL pipeline:
-   - `data_prep` component → processed dataset (uri_folder output).
-   - `train` component (using `aml/components/hpo.yaml`) launched with `.sweep(...)` so HyperDrive explores the search space.
-4. Submits the job and prints the Studio URL.
+- **Manual control**: Submit sweeps per model type with custom configurations
+- **Result analysis**: Built-in cells to load previous sweeps and analyze best models
+- **Config export**: Automatically export best model configuration to `configs/train.yaml`
+- **Pipeline integration**: Run training pipeline directly from the notebook
 
-`aml/components/hpo.yaml` maps the search space to CLI overrides on `train.py`:
+### Workflow Steps
 
-```yaml
-command: >-
-  python train.py
-  --data ${{inputs.processed_data}}
-  --model-artifact-dir ${{outputs.model_output}}
-  --parent-run-id-output ${{outputs.parent_run_id}}
-  --model-type ${{inputs.model_type}}
-  $[[--set rf.max_depth=${{inputs.rf_max_depth}}]]
-  ...
-```
+1. **Setup**: Configure Azure ML client and load HPO configuration from `configs/hpo.yaml`
+2. **Data**: Set training data URI (from previous data prep job or environment variable)
+3. **Configure Sweeps**: Build sweep jobs per model type from `configs/hpo.yaml`
+4. **Submit Sweeps**: Submit sweep jobs to Azure ML (or load previous submissions)
+5. **Analyze Results**: Find best model and export configuration to `configs/train.yaml`
+6. **Run Pipeline**: Train the best model using the exported configuration
+
+### How It Works
+
+The notebook uses `src/run_sweep_trial.py` as a helper script that:
+
+- Invokes `train.py` with sweep-managed hyperparameters
+- Converts sweep parameter names (e.g., `rf_n_estimators`) to `train.py` format (e.g., `rf.n_estimators`)
+- Handles training-level parameters (e.g., `use_smote`, `class_weight`, `random_state`)
 
 Each trial:
 
-- Trains one model type (from search space) with sampled hyperparameters.
-- Applies the proposed hyperparameters via `--set model.param=value`.
-- Logs metrics, parameters, and tags to MLflow (uses active run, no nested runs in Azure ML).
-- Saves model artifacts to the component output (`model_output`).
+- Trains one model type (from search space) with sampled hyperparameters
+- Applies the proposed hyperparameters via `--set model.param=value`
+- Logs metrics, parameters, and tags to MLflow (uses active run, no nested runs in Azure ML)
+- Saves model artifacts to the component output (`model_output`)
 
-HyperDrive picks the best trial based on the configured metric.
+Azure ML picks the best trial based on the configured metric in `configs/hpo.yaml`.
 
-## 3. Extract Best Hyperparameters
-
-After the sweep completes, extract the best hyperparameters and update the training configuration:
-
-```bash
-python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
-```
-
-This script:
-
-- Extracts best hyperparameters from the HPO sweep
-- Automatically updates `configs/train.yaml` with the best model and hyperparameters
-- Sets `models: [best_model]` to train only the best model found
-
-## 4. Configuration (`configs/hpo.yaml` and `configs/train.yaml`)
+## 3. Configuration (`configs/hpo.yaml` and `configs/train.yaml`)
 
 **`configs/hpo.yaml`** defines the HyperDrive sweep:
 
-- `metric` / `mode` – e.g., maximise F1.
-- `budget.max_trials` / `budget.max_concurrent` – sweep size and parallelism.
-- `early_stopping` – enables `MedianStoppingPolicy` during sweeps.
-- `search_space` – candidate values per model (Random Forest, XGBoost, etc.).
+- `metric` / `mode` – e.g., maximise F1
+- `budget.max_trials` / `budget.max_concurrent` – sweep size and parallelism
+- `early_stopping` – enables `MedianStoppingPolicy` during sweeps
+- `search_space` – candidate values per model (Random Forest, XGBoost, Logistic Regression)
+- `timeouts` – total and per-trial timeout limits
 
 **`configs/train.yaml`** contains:
 
 - `training.models` – list of models to train (should be only the best model after HPO)
 - `training.hyperparameters` – hyperparameters for each model (updated with best values after HPO)
+- Training-level parameters: `use_smote`, `class_weight`, `random_state`
 
-`run_hpo.py` converts the search space lists into Azure ML `Choice` distributions.
+The notebook converts the search space lists into Azure ML `Choice` distributions when building sweep jobs.
 
-## 5. Typical Workflow
+## 4. Production Training Pipeline
 
-1. Update `configs/hpo.yaml` with the search space for hyperparameter optimization.
-2. Run `python run_hpo.py` to submit the HyperDrive sweep.
-3. Track progress in Azure ML Studio; capture the parent run ID when complete.
-4. Extract best hyperparameters and update config:
+After HPO completes and the best model configuration is exported:
 
-   ```bash
-   python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
-   ```
+**Option A: Run from notebook** (recommended):
 
-5. Train the best model with optimized hyperparameters:
+1. Run the "Run Training Pipeline" cell in `notebooks/hpo_manual_trials.ipynb`
+2. This automatically uses the exported `configs/train.yaml` configuration
+
+**Option B: Run from command line**:
 
    ```bash
    python run_pipeline.py
    ```
 
-That's the entire HyperDrive-first loop: configuration-driven sweeps, automatic best parameter extraction, and production-ready training.
+The pipeline:
+
+- Uses `aml/components/train.yaml` component for training
+- Trains models specified in `configs/train.yaml` → `training.models`
+- Uses hyperparameters from `configs/train.yaml` → `training.hyperparameters`
+- Produces production-ready model artifacts
+
+## 5. Typical Workflow
+
+1. **Initial Setup** (first time or when retuning):
+   - Open `notebooks/hpo_manual_trials.ipynb`
+   - Configure and submit HPO sweeps
+   - Analyze results and export best model configuration
+   - Run production training pipeline
+
+2. **Regular Retraining** (with fixed hyperparameters):
+   - Update data asset if needed
+   - Run `python run_pipeline.py` (skip HPO)
+
+3. **Periodic Re-optimization**:
+   - Run HPO again if data distribution changes or performance degrades
+   - Export new best configuration
+   - Run production training pipeline
+
+That's the entire workflow: notebook-driven HPO sweeps, automatic config export, and production-ready training.

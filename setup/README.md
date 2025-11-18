@@ -181,7 +181,7 @@ AZURE_STORAGE_CONTAINER="data"
 AZURE_ACR_NAME="your-acr-name"
 
 # Data Assets
-# Used by pipeline scripts (run_pipeline.py, run_hpo.py) via get_data_asset_config()
+# Used by pipeline scripts (run_pipeline.py) via get_data_asset_config()
 DATA_ASSET_FULL="churn-data"
 DATA_ASSET_SAMPLE="churn-data-sample"
 DATA_VERSION="1"
@@ -225,7 +225,7 @@ AZURE_STORAGE_CONTAINER="data"
 AZURE_ACR_NAME="your-acr-name"
 
 # Data Assets
-# Used by pipeline scripts (run_pipeline.py, run_hpo.py) via get_data_asset_config()
+# Used by pipeline scripts (run_pipeline.py) via get_data_asset_config()
 DATA_ASSET_FULL="churn-data"
 DATA_ASSET_SAMPLE="churn-data-sample"
 DATA_VERSION="1"
@@ -374,7 +374,7 @@ If you didn't create ACR during initial setup, you can create it manually:
   
 ```bash
 az acr create \
-  --resource-group "${AZURE_RESOURCE_GROUP:-rg-churn-ml-project-2025-11-15}" \
+  --resource-group "${AZURE_RESOURCE_GROUP:-rg-churn-ml-project}" \
   --name <your-acr-name> \
   --sku Basic \
   --location "${AZURE_LOCATION:-southeastasia}"
@@ -616,24 +616,4 @@ az group delete `
 - **Compute Cluster**: Only charges when nodes are active. Auto-scales to 0 when idle.
 - Use `MIN_NODES=0` to ensure cluster scales down completely when idle.
 
-## Troubleshooting
-
-## Git Remote Setup
-
-If you need to set up a git remote repository:
-
-**Linux/Mac:**
-
-```bash
-git remote add origin <repository-url>
-git branch -M main
-git push -u origin main
-```
-
-**Windows (PowerShell):**
-
-```powershell
-git remote add origin <repository-url>
-git branch -M main
-git push -u origin main
-```
+For detailed troubleshooting information, see [`../docs/TROUBLESHOOTING.md`](../docs/TROUBLESHOOTING.md).

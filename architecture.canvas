@@ -38,15 +38,6 @@
     },
     {
       "type": "text",
-      "id": "hpo-train-component",
-      "x": 1013.1200965318305,
-      "y": -41.458068480327356,
-      "width": 318.0361518572572,
-      "height": 227.41442065150275,
-      "text": "HPO Train Component\n(aml/components/hpo.yaml)\n\n- Input: processed_data,\nmodel_type, hyperparams\n- Output: model_output,\nparent_run_id\n\nFor hyperparameter\noptimization sweeps"
-    },
-    {
-      "type": "text",
       "id": "0ed16cbc-c5c3-4d2f-a023-ba6e09692cd6",
       "x": 1175.522476390389,
       "y": 691.47553038704,
@@ -116,15 +107,6 @@
       "width": 243.5195099248665,
       "height": 204.67023572951922,
       "text": "Model Output\n(uri_folder)\n\n- {model}_model.pkl\n- model_metadata.json"
-    },
-    {
-      "type": "text",
-      "id": "fc7863e6-dbde-4fec-bf14-33e1c84b85e3",
-      "x": 1600.926552541938,
-      "y": 31.707637801257192,
-      "width": 318.1971076986272,
-      "height": 318.7596367301694,
-      "text": "extract_best_params.py: [[src/extract_best_params.py]]\n\n- **extract_best_params_from_sweep()**: Extracts best hyperparameters and model type from a sweep run\n- **update_config()**: Updates configs/train.yaml with best hyperparameters and model\n- **main()**: CLI entry point that extracts best params and optionally updates config"
     },
     {
       "type": "text",
@@ -262,24 +244,6 @@
       "text": "run_pipeline.py: [[run_pipeline.py]]\n\n- load_azure_config(): Loads Azure ML configuration from environment variables\n- load_pipeline_components(): Loads AML components from the specified directory\n- define_pipeline(): Defines the Azure ML pipeline using the loaded components\n- **main()**: Main function that loads config, creates ML client, and submits the pipeline job"
     },
     {
-      "type": "text",
-      "id": "run-hpo-001",
-      "x": -418.68091747434676,
-      "y": 337.9282484903886,
-      "width": 266.78432869056314,
-      "height": 237.89650830021907,
-      "text": "run_hpo.py: [[run_hpo.py]]\n\n- **create_hpo_pipeline()**: Creates HPO pipeline with sweep configuration\n- **main()**: Main entry point that loads config, creates ML client, and submits the HPO sweep job"
-    },
-    {
-      "type": "text",
-      "id": "extract-component-001",
-      "x": 2180.5413751408114,
-      "y": -616.4771436408613,
-      "width": 391.34292288419874,
-      "height": 145.40567482045554,
-      "text": "Extract Best Params Component\n(aml/components/extract_best_params.yaml)\n\nInput: parent_run_id_file\nOutput: best_params_json"
-    },
-    {
       "type": "group",
       "id": "227338b8-c1dc-49db-88b2-68cd753dc4f0",
       "x": 2110.544655423108,
@@ -287,6 +251,24 @@
       "width": 653.4508767296711,
       "height": 517.2121823826636,
       "label": "MLflow & Tracking"
+    },
+    {
+      "type": "text",
+      "id": "notebook-hpo-001",
+      "x": -418.68091747434676,
+      "y": 337.9282484903886,
+      "width": 350,
+      "height": 280,
+      "text": "hpo_manual_trials.ipynb\n(notebooks/)\n\n- Builds sweep jobs from\n  configs/hpo.yaml\n- Submits sweeps to Azure ML\n- Analyzes results\n- Exports best config to\ntrain.yaml\n- Runs training pipeline"
+    },
+    {
+      "type": "text",
+      "id": "run-sweep-trial-001",
+      "x": 1013.1200965318305,
+      "y": -41.458068480327356,
+      "width": 318.0361518572572,
+      "height": 200,
+      "text": "run_sweep_trial.py: [[src/run_sweep_trial.py]]\n\n- Helper script for HPO sweeps\n- Invokes train.py with\n  sweep-managed hyperparameters\n- Formats parameters for train.py\n  (rf_n_estimators \u2192 rf.n_estimators)"
     }
   ],
   "edges": [
@@ -321,18 +303,6 @@
       "toSide": "top",
       "toEnd": "arrow",
       "color": "#ff0000",
-      "label": "executes",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "hpo-executes-train",
-      "fromNode": "hpo-train-component",
-      "fromSide": "bottom",
-      "toNode": "0ed16cbc-c5c3-4d2f-a023-ba6e09692cd6",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
       "label": "executes",
       "style": "solid",
       "shape": "curved"
@@ -390,30 +360,6 @@
       "toSide": "bottom",
       "toEnd": "arrow",
       "label": "executes",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "d2884736-7ae0-4aae-97ad-0f4f32c368fb",
-      "fromNode": "d775acc1-fcab-4ed6-bb85-149ae8d2e6a7",
-      "fromSide": "left",
-      "toNode": "fc7863e6-dbde-4fec-bf14-33e1c84b85e3",
-      "toSide": "right",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "queries",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "d55e7e44-11bd-458d-971b-0533fe6175d6",
-      "fromNode": "36b437be-bf42-4fd0-bc41-f9ca54ee41ef",
-      "fromSide": "bottom",
-      "toNode": "fc7863e6-dbde-4fec-bf14-33e1c84b85e3",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "input",
       "style": "solid",
       "shape": "curved"
     },
@@ -620,138 +566,6 @@
       "shape": "curved"
     },
     {
-      "id": "run-hpo-to-hpo-utils",
-      "fromNode": "run-hpo-001",
-      "fromSide": "bottom",
-      "toNode": "b79f3115-c96f-49dd-af1e-de863ce52eb0",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "uses",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "run-hpo-to-hpo-config",
-      "fromNode": "run-hpo-001",
-      "fromSide": "bottom",
-      "toNode": "75e3de7f-f53c-41be-ab95-4ad52fc9b2fc",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "reads",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "hpo-config-to-hpo-component",
-      "fromNode": "75e3de7f-f53c-41be-ab95-4ad52fc9b2fc",
-      "fromSide": "right",
-      "toNode": "hpo-train-component",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "configures",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "run-hpo-to-train",
-      "fromNode": "run-hpo-001",
-      "fromSide": "right",
-      "toNode": "hpo-train-component",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "orchestrates with sweep",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "processed-data-to-hpo",
-      "fromNode": "026e1fcf-f599-4920-bfc6-fdfe05b782c3",
-      "fromSide": "right",
-      "toNode": "hpo-train-component",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "input",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "hpo-to-parent-run",
-      "fromNode": "hpo-train-component",
-      "fromSide": "right",
-      "toNode": "36b437be-bf42-4fd0-bc41-f9ca54ee41ef",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "outputs",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "hpo-to-model-output",
-      "fromNode": "hpo-train-component",
-      "fromSide": "top",
-      "toNode": "0198409b-c8bf-4508-8ece-ef63cc7c75de",
-      "toSide": "bottom",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "outputs",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "extract-component-to-script",
-      "fromNode": "extract-component-001",
-      "fromSide": "bottom",
-      "toNode": "fc7863e6-dbde-4fec-bf14-33e1c84b85e3",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "wraps",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "extract-component-to-parent-run",
-      "fromNode": "36b437be-bf42-4fd0-bc41-f9ca54ee41ef",
-      "fromSide": "right",
-      "toNode": "extract-component-001",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "input",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "f8f863e7-b78a-4787-b9e5-afc71a1fb32c",
-      "fromNode": "08f2a696-8231-459e-9ffa-f22c109220d4",
-      "fromSide": "bottom",
-      "toNode": "run-hpo-001",
-      "toSide": "left",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "reads data asset",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "cbd502f5-5901-44c5-bbdf-6fceccdb16fe",
-      "fromNode": "run-hpo-001",
-      "fromSide": "right",
-      "toNode": "c69a6522-1e13-4c45-95c7-68450ffd471d",
-      "toSide": "bottom",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "orchestrates",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
       "id": "a2b3c4d5-e6f7-8901-bcde-f12345678901",
       "fromNode": "084e1d5f-7aef-4849-9b01-f861f70f7450",
       "fromSide": "bottom",
@@ -759,18 +573,6 @@
       "toSide": "top",
       "toEnd": "arrow",
       "label": "uses",
-      "style": "solid",
-      "shape": "curved"
-    },
-    {
-      "id": "9cb6cbf3-a374-468c-8926-37c4832e3f38",
-      "fromNode": "fc7863e6-dbde-4fec-bf14-33e1c84b85e3",
-      "fromSide": "left",
-      "toNode": "99ef44e6-7aca-4ef2-85b9-a7c2af204195",
-      "toSide": "top",
-      "toEnd": "arrow",
-      "color": "#00ff00",
-      "label": "updates",
       "style": "solid",
       "shape": "curved"
     },
@@ -794,6 +596,78 @@
       "toSide": "right",
       "toEnd": "arrow",
       "label": "reads",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "notebook-to-hpo-config",
+      "fromNode": "notebook-hpo-001",
+      "fromSide": "bottom",
+      "toNode": "75e3de7f-f53c-41be-ab95-4ad52fc9b2fc",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "reads",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "notebook-to-hpo-utils",
+      "fromNode": "notebook-hpo-001",
+      "fromSide": "bottom",
+      "toNode": "b79f3115-c96f-49dd-af1e-de863ce52eb0",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "uses",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "notebook-to-sweep-trial",
+      "fromNode": "notebook-hpo-001",
+      "fromSide": "right",
+      "toNode": "run-sweep-trial-001",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "calls via sweep",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "sweep-trial-to-train",
+      "fromNode": "run-sweep-trial-001",
+      "fromSide": "bottom",
+      "toNode": "0ed16cbc-c5c3-4d2f-a023-ba6e09692cd6",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "invokes",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "notebook-to-train-config",
+      "fromNode": "notebook-hpo-001",
+      "fromSide": "right",
+      "toNode": "99ef44e6-7aca-4ef2-85b9-a7c2af204195",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "exports to",
+      "style": "solid",
+      "shape": "curved"
+    },
+    {
+      "id": "notebook-to-pipeline",
+      "fromNode": "notebook-hpo-001",
+      "fromSide": "top",
+      "toNode": "run-pipeline-001",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "can run",
       "style": "solid",
       "shape": "curved"
     }

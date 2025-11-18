@@ -9,7 +9,6 @@ This document outlines the plan and structure for building the Bank Customer Chu
 ├── aml/
 │   ├── components/
 │   │   ├── data_prep.yaml
-│   │   ├── extract_best_params.yaml
 │   │   └── train.yaml          # Regular training component (fixed hyperparameters)
 │   └── environments/
 │       └── environment.yml     # Azure ML environment definition (Docker image reference)
@@ -46,7 +45,7 @@ This document outlines the plan and structure for building the Bank Customer Chu
 │   │   ├── mlflow_utils.py     # MLflow integration utilities
 │   │   └── ...
 │   ├── data_prep.py            # Data preprocessing script
-│   ├── extract_best_params.py  # Extract best hyperparameters from HPO runs
+│   ├── run_sweep_trial.py      # Helper script for HPO sweep trials
 │   ├── train.py                # Model training script
 │   └── README.md
 ├── config.env                  # Environment configuration (not in git)
@@ -150,7 +149,7 @@ See [[setup/README.md]].
 2. **Develop Core Scripts**:
     - `src/data_prep.py`: Data preprocessing stage
     - `src/train.py`: Model training with MLflow logging (supports `--model-type` for HPO mode, `--set model.param=value` for hyperparameter overrides). In regular mode, models are determined from `configs/train.yaml` → `training.models`.
-    - `src/extract_best_params.py`: Extract best hyperparameters and model type from MLflow sweep runs, automatically updates `configs/train.yaml`
+    - `src/run_sweep_trial.py`: Helper script that invokes `train.py` with sweep-managed hyperparameters (used by notebook HPO workflow)
 3. **Create `src/models/` package**: Individual model definitions (logreg, rf, xgboost)
 
 > **HPO mode** (`--model-type`): Required for hyperparameter optimization sweeps. Each sweep trial trains a single model type (selected by the sweep algorithm) with specific hyperparameters. The `model_type` itself is treated as a categorical hyperparameter, allowing the sweep to explore different model types and their hyperparameters simultaneously.
@@ -242,8 +241,7 @@ docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
 2. **Create component YAML files**:
     - `aml/components/data_prep.yaml`: Data preprocessing component
     - `aml/components/train.yaml`: Training component for regular training (fixed hyperparameters from config)
-    - `aml/components/extract_best_params.yaml`: Component to extract best hyperparameters from MLflow sweep runs (optional, can be run locally)
-    - *HPO note*: sweep jobs are defined directly inside `notebooks/hpo_manual_trials.ipynb` and call `src/run_sweep_trial.py`, so no dedicated `hpo.yaml` component is required.
+    - *HPO note*: Sweep jobs are defined directly inside `notebooks/hpo_manual_trials.ipynb` and call `src/run_sweep_trial.py`, so no dedicated `hpo.yaml` component is required.
 
 ### Step 11: Push Docker Image to ACR and Register Azure ML Environment
 
@@ -444,28 +442,16 @@ budget:
 - View MLflow/Studio charts to compare child trials in real time.
 - Wait for all trials to complete (duration depends on `max_trials` and compute availability).
 
-**1.4. Get parent run ID**:
+**1.4. Analyze results and export best model**:
 
-- The submission cell displays the sweep job name (also visible in Studio). Use that as the parent run ID when extracting best parameters.
+1. After sweeps complete, run the "Analyze Results" cell in the notebook to find the best model across all sweeps.
+2. Run the "Export Best Model Configuration" cell to automatically export the best model's hyperparameters to `configs/train.yaml`.
+   - The export cell preserves existing config structure
+   - Updates `training.models` to include only the best model
+   - Updates `training.hyperparameters.<model_type>` with best hyperparameters
+   - Ensures string values are properly quoted (e.g., `use_smote: "true"`, `max_features: "sqrt"`)
 
-#### 2. Extract Best Hyperparameters
-
-**2.1. Extract and update config**:
-
-```bash
-# Replace <PARENT_RUN_ID> with the actual parent run ID from HPO sweep
-python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
-```
-
-This script:
-
-- Finds the best trial from the HPO sweep (based on primary metric, e.g., `f1`)
-- Extracts the best model type and hyperparameters
-- Automatically updates `configs/train.yaml` with:
-  - `training.models`: Set to `[best_model_type]` (e.g., `[xgboost]`)
-  - `training.hyperparameters.<model_type>`: Updated with best hyperparameters
-
-**2.2. Verify updated config**:
+**1.5. Verify exported config**:
 
 ```bash
 # Check that configs/train.yaml was updated
@@ -476,28 +462,38 @@ You should see:
 
 - `models: [best_model_type]` (only the best model)
 - Updated hyperparameters for that model
+- Training-level parameters (e.g., `use_smote: "true"`) properly quoted
 
-#### 3. Run Production Training Pipeline
+#### 2. Run Production Training Pipeline
 
-**3.1. Run pipeline with optimized hyperparameters**:
+**2.1. Run pipeline with optimized hyperparameters**:
+
+You can either:
+
+**Option A: Run from notebook** (recommended):
+
+1. Run the "Run Training Pipeline" cell in `notebooks/hpo_manual_trials.ipynb`
+2. This automatically uses the exported `configs/train.yaml` configuration
+
+**Option B: Run from command line**:
 
 ```bash
 python run_pipeline.py
 ```
 
-This will:
+Both options will:
 
 - Use the updated `configs/train.yaml` with best hyperparameters
 - Train only the best model type (faster, more efficient)
 - Produce production-ready model artifacts
 
-**3.2. Monitor training job**:
+**2.2. Monitor training job**:
 
 - Check Azure ML Studio for job status
 - View MLflow run for metrics and artifacts
 - Wait for job completion (typically 5-15 minutes)
 
-**3.3. Get model artifacts**:
+**2.3. Get model artifacts**:
 
 After completion, model artifacts are available:
 
@@ -505,9 +501,9 @@ After completion, model artifacts are available:
 - **MLflow**: Run artifacts (if MLflow tracking enabled)
 - Models are saved as pickle files and can be downloaded or registered
 
-#### 4. Use Trained Models
+#### 3. Use Trained Models
 
-**4.1. Download models locally** (if needed):
+**3.1. Download models locally** (if needed):
 
 ```bash
 # Get job name from Azure ML Studio or from the output of run_pipeline.py
@@ -515,7 +511,7 @@ JOB_NAME="<job-name>"
 az ml job download --name $JOB_NAME --output-dir ./models
 ```
 
-**4.2. Register model in Azure ML** (for deployment):
+**3.2. Register model in Azure ML** (for deployment):
 
 ```bash
 # Register the model from job outputs
@@ -527,21 +523,21 @@ az ml model create \
   --workspace-name <workspace-name>
 ```
 
-**4.3. Use model for inference**:
+**3.3. Use model for inference**:
 
 - Models are logged with MLflow and support `mlflow.pyfunc` deployment
 - Can be deployed to Azure ML online endpoints
 - Can be loaded locally: `mlflow.pyfunc.load_model("runs:/<run-id>/model")`
 
-#### 5. Iterate and Improve
+#### 4. Iterate and Improve
 
-**5.1. Monitor model performance**:
+**4.1. Monitor model performance**:
 
 - Track metrics in MLflow over time
 - Compare different training runs
 - Monitor production model performance (if deployed)
 
-**5.2. Retrain when needed**:
+**4.2. Retrain when needed**:
 
 - **Regular retraining**: Run `python run_pipeline.py` periodically with updated data
 - **Re-optimize**: Run HPO again if:
@@ -550,7 +546,7 @@ az ml model create \
   - New features are added
   - Business requirements change
 
-**5.3. Update data asset** (if using new data):
+**4.3. Update data asset** (if using new data):
 
 ```bash
 # Create new version of data asset
@@ -563,9 +559,9 @@ python run_pipeline.py
 
 #### Typical Production Workflow Summary
 
-1. **Initial Setup**: Run HPO → Extract best params → Run production pipeline
+1. **Initial Setup**: Run HPO in notebook → Export best config in notebook → Run production pipeline (from notebook or CLI)
 2. **Regular Retraining**: Update data → Run production pipeline (skip HPO)
-3. **Periodic Re-optimization**: Run HPO → Extract best params → Run production pipeline
+3. **Periodic Re-optimization**: Run HPO in notebook → Export best config in notebook → Run production pipeline
 
 **Time Estimates**:
 
@@ -583,8 +579,11 @@ python run_pipeline.py
 - Loads `configs/hpo.yaml` via `hpo_utils.py` to construct per-model search spaces
 - Uses `src/run_sweep_trial.py` → `train.py` to run each sampled configuration with `--set model.param=value`
 - Provides interactive monitoring output (job names, Studio links, chosen hyperparameters)
+- **Analyze Results**: Built-in cell to find the best model across all sweeps
+- **Export Config**: Automatically exports best model configuration to `configs/train.yaml` with proper YAML formatting
+- **Run Pipeline**: Optional cell to run training pipeline directly from the notebook
 - **Use when**: First-time optimization, tuning new search spaces, or validating sweep fixes
-- **Outputs**: Azure ML sweep jobs with logged metrics/params per child run
+- **Outputs**: Azure ML sweep jobs with logged metrics/params per child run, plus exported `configs/train.yaml` for production training
 
 ### `run_pipeline.py` - Fixed-Hyperparameter Training
 
@@ -604,10 +603,12 @@ See [Step 13: Production Workflow](#step-13-production-workflow---run-pipeline-w
 **Quick Summary**:
 
 1. Use `notebooks/hpo_manual_trials.ipynb` to find best hyperparameters (uses Azure ML sweeps + `run_sweep_trial.py`)
-2. Extract best hyperparameters and update config: `python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>`
+2. In the notebook, run the "Analyze Results" cell to find the best model, then run the "Export Best Model Configuration" cell
    - This automatically updates `configs/train.yaml` with best model and hyperparameters
    - Sets `models: [best_model]` to train only the best model
-3. Run `run_pipeline.py` for quick training with optimized hyperparameters (uses `train.yaml` component)
+   - Ensures proper YAML formatting with quoted string values
+3. Run the "Run Training Pipeline" cell in the notebook, or run `run_pipeline.py` from command line
+   - Both use the exported `configs/train.yaml` configuration
 
 **For subsequent retraining**: Simply run `run_pipeline.py` with updated data (skip HPO unless re-optimization is needed).
 

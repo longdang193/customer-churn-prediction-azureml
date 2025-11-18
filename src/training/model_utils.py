@@ -7,9 +7,14 @@ import pandas as pd
 from models import get_logistic_regression, get_random_forest, get_xgboost
 
 JSONDict = Dict[str, Any]
+MODEL_FACTORY = {
+    "logreg": get_logistic_regression,
+    "rf": get_random_forest,
+    "xgboost": get_xgboost,
+}
 
 
-def get_model(model_name: str, class_weight: Optional[str] = 'balanced', random_state: int = 42) -> Any:
+def get_model(model_name: str, class_weight: Optional[str] = "balanced", random_state: int = 42) -> Any:
     """Return a configured estimator instance.
     
     Args:
@@ -23,14 +28,9 @@ def get_model(model_name: str, class_weight: Optional[str] = 'balanced', random_
     Raises:
         ValueError: If model_name is not recognized
     """
-    model_map = {
-        'logreg': get_logistic_regression,
-        'rf': get_random_forest,
-        'xgboost': get_xgboost,
-    }
-    if model_name not in model_map:
-        raise ValueError(f"Unknown model: {model_name}. Choose from: {list(model_map.keys())}")
-    return model_map[model_name](class_weight=class_weight, random_state=random_state)
+    if model_name not in MODEL_FACTORY:
+        raise ValueError(f"Unknown model: {model_name}. Choose from: {list(MODEL_FACTORY.keys())}")
+    return MODEL_FACTORY[model_name](class_weight=class_weight, random_state=random_state)
 
 
 def apply_hyperparameters(model: Any, hyperparams: Optional[JSONDict]) -> tuple[Any, JSONDict]:
@@ -44,11 +44,9 @@ def apply_hyperparameters(model: Any, hyperparams: Optional[JSONDict]) -> tuple[
         Tuple of (model, applied_params) where applied_params contains only
         successfully applied parameters
     """
-    applied: JSONDict = {}
-    if not hyperparams:
-        return model, applied
+    if not hyperparams or not hasattr(model, "get_params"):
+        return model, {}
     
-    try:
         valid_params = model.get_params(deep=True)
         applied = {k: v for k, v in hyperparams.items() if k in valid_params}
         
@@ -56,10 +54,13 @@ def apply_hyperparameters(model: Any, hyperparams: Optional[JSONDict]) -> tuple[
         if "min_samples_split" in applied and applied["min_samples_split"] < 2:
             applied["min_samples_split"] = 2
         
-        if applied:
+    if not applied:
+        return model, {}
+
+    try:
             model.set_params(**applied)
     except Exception:
-        applied = {}
+        return model, {}
     
     return model, applied
 

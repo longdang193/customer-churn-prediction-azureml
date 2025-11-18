@@ -2,8 +2,6 @@
 
 Centralized project dependencies and workflow for reproducible environments.
 
-Centralized project dependencies and workflow for reproducible environments.
-
 ## Files
 
 - `requirements.in` — application/runtime dependencies (unpinned)

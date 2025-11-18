@@ -119,7 +119,7 @@ Azure ML configuration loading utilities. Uses `env_loader` and `path_utils` int
 **Functions:**
 
 - `load_azure_config(config_path: Optional[str] = None) -> Dict[str, str]` - Load Azure ML workspace configuration
-- `get_data_asset_config(config_path: Optional[str] = None) -> Dict[str, str]` - Get data asset configuration
+- `get_data_asset_config(config_path: Optional[str] = None) -> Dict[str, str]` - Get data asset configuration (requires `DATA_ASSET_FULL` and `DATA_VERSION` in your `config.env`)
 
 **Example:**
 
@@ -134,9 +134,9 @@ azure_config = load_azure_config()
 #     "workspace_name": "..."
 # }
 
-# Get data asset config
+# Get data asset config (values must be defined in config.env)
 data_config = get_data_asset_config()
-# Returns: {
+# Example returns: {
 #     "data_asset_name": "churn-data",
 #     "data_asset_version": "1"
 # }

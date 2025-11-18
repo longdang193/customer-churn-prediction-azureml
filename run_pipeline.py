@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.ai.ml import MLClient, dsl, load_component, Input
 
-from src.utils import load_azure_config, get_data_asset_config
+from src.utils import load_azure_config, get_data_asset_config, load_config
 
 
 def load_pipeline_components(components_dir: Path) -> Dict[str, Any]:
@@ -38,6 +38,18 @@ def define_pipeline(components: Dict[str, Any]):
     return churn_prediction_pipeline
 
 
+def get_pipeline_metadata(config_path: Path) -> Dict[str, Any]:
+    """Extract optional experiment and display names from the training config."""
+    if not config_path.exists():
+        return {}
+    config = load_config(str(config_path)) or {}
+    training_cfg = config.get("training", {}) or {}
+    return {
+        "experiment_name": training_cfg.get("experiment_name"),
+        "display_name": training_cfg.get("display_name"),
+    }
+
+
 def main():
     """Main function to define and run the Azure ML pipeline."""
     # Load environment variables from config.env
@@ -53,6 +65,8 @@ def main():
     )
     components = load_pipeline_components(Path("aml/components"))
     pipeline = define_pipeline(components)
+    train_config_path = Path("configs/train.yaml")
+    pipeline_metadata = get_pipeline_metadata(train_config_path)
 
     # Get data asset configuration
     data_asset_config = get_data_asset_config()
@@ -64,6 +78,13 @@ def main():
         mode="mount",
     )
     pipeline_job = pipeline(pipeline_job_input_data=pipeline_input)
+    pipeline_job.settings.force_rerun = True
+    experiment_name = pipeline_metadata.get("experiment_name")
+    display_name = pipeline_metadata.get("display_name")
+    if experiment_name:
+        pipeline_job.experiment_name = experiment_name
+    if display_name:
+        pipeline_job.display_name = display_name
     returned_job = ml_client.jobs.create_or_update(pipeline_job)
     
     print(f"✓ Job submitted: {returned_job.name}")

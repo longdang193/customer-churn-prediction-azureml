@@ -38,12 +38,12 @@ def get_data_asset_config(config_path: Optional[str] = None) -> Dict[str, str]:
         Dictionary containing data_asset_name and data_asset_version
         
     Raises:
-        ValueError: If DATA_ASSET_FULL is not set
+        ValueError: If either DATA_ASSET_FULL or DATA_VERSION is missing
     """
     load_env_file(config_path)
     
-    data_asset_name = get_env_var("DATA_ASSET_FULL", default="churn-data")
-    data_asset_version = get_env_var("DATA_VERSION", default="1")
+    data_asset_name = get_env_var("DATA_ASSET_FULL", required=True)
+    data_asset_version = get_env_var("DATA_VERSION", required=True)
     
     return {
         "data_asset_name": data_asset_name,

@@ -12,7 +12,7 @@ from .model_utils import (
     apply_hyperparameters,
     get_model,
 )
-from .training import get_pip_requirements, train_all_models, train_model
+from .training import train_model, train_pipeline_stage
 
 __all__ = [
     # Hyperparameters
@@ -26,9 +26,8 @@ __all__ = [
     "apply_hyperparameters",
     "get_model",
     # Training
-    "get_pip_requirements",
-    "train_all_models",
     "train_model",
+    "train_pipeline_stage",
 ]
 
 
