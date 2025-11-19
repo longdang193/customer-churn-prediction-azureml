@@ -178,22 +178,7 @@ See [[setup/README.md]].
 4. **Create `hpo_utils.py`**: Utility functions for HPO (loads configs, builds parameter space)
 5. **Update Scripts**: Ensure scripts pull defaults from config but remain overrideable via CLI arguments
 
-### Step 7: Create Pipeline Orchestration Paths
-
-1. **`notebooks/hpo_manual_trials.ipynb`**: Notebook-driven HPO orchestration
-    - Imports `hpo_utils.py` to load `configs/hpo.yaml` and construct the search space
-    - Builds Azure ML sweep jobs per model type and wires them to `src/run_sweep_trial.py`, which invokes `train.py` with `--set model.param=value`
-    - Handles data asset inputs, compute selection, and early stopping policies directly inside the notebook
-    - Preferred workflow for launching sweeps today (run cells sequentially to submit/monitor jobs)
-
-2. **`run_pipeline.py`**: Fixed-hyperparameter training pipeline
-    - Uses `aml/components/train.yaml` component for training
-    - Simple pipeline: data_prep → train
-    - Models determined from `configs/train.yaml` → `training.models`
-    - Automatically loads `config.env` for Azure ML configuration
-    - Use for: Quick retraining, production deployments, after HPO
-
-### Step 8: Declare Dependencies
+### Step 7: Declare Dependencies
 
 **Important**: Use Python 3.9 from the start to match the Dockerfile (`python:3.9-slim`). This ensures all compiled requirements are compatible with the production environment.
 
@@ -232,7 +217,7 @@ See [[setup/README.md]].
 
 5. **Sync environments**: Docker image, local venv, and AML compute all install from compiled requirements
 
-### Step 9: Define and Test the Docker Image
+### Step 8: Define and Test the Docker Image
 
 1. **Create `Dockerfile`** in the project root
 2. Start from slim Python base image, copy `requirements.txt` first (for layer caching), then application code
@@ -247,7 +232,7 @@ docker run --rm bank-churn:1 bash -c "cd /app/src && python data_prep.py --help"
 docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
 ```
 
-### Step 10: Build AML Components
+### Step 9: Build AML Components
 
 1. **Create `aml/components/` directory**
 2. **Create component YAML files**:
@@ -255,11 +240,11 @@ docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
     - `aml/components/train.yaml`: Training component for regular training (fixed hyperparameters from config)
     - *HPO note*: Sweep jobs are defined directly inside `notebooks/hpo_manual_trials.ipynb` and call `src/run_sweep_trial.py`, so no dedicated `hpo.yaml` component is required.
 
-### Step 11: Push Docker Image to ACR and Register Azure ML Environment
+### Step 10: Push Docker Image to ACR and Register Azure ML Environment
 
 **Prerequisites:**
 
-- Docker image built (from Step 9): `bank-churn:1`
+- Docker image built (from Step 8): `bank-churn:1`
 - Azure Container Registry (ACR) created and configured in `config.env` as `AZURE_ACR_NAME`
 - Compute cluster created with system-assigned managed identity (setup script does this automatically)
 - ACR name is separate from the Azure ML environment name (`bank-churn-env`)
@@ -271,7 +256,7 @@ docker run --rm bank-churn:1 python -c "import pandas; print('OK')"
 
 #### 1. Prepare Docker Image for ACR
 
-**1.1. Build Docker image** (if not already built in Step 9):
+**1.1. Build Docker image** (if not already built in Step 8):
 
 ```bash
 # Build the Docker image locally
@@ -401,6 +386,21 @@ The output should show:
 - The Docker image **must exist in ACR** before registering the environment, otherwise registration will fail
 - All component YAML files (`aml/components/*.yaml`) reference `azureml:bank-churn-env:1` for consistent dependencies
 - If you update the Docker image, push a new tag and create a new environment version, or update the existing environment
+
+### Step 11: Create Pipeline Orchestration Paths
+
+1. **`notebooks/hpo_manual_trials.ipynb`**: Notebook-driven HPO orchestration
+    - Imports `hpo_utils.py` to load `configs/hpo.yaml` and construct the search space
+    - Builds Azure ML sweep jobs per model type and wires them to `src/run_sweep_trial.py`, which invokes `train.py` with `--set model.param=value`
+    - Handles data asset inputs, compute selection, and early stopping policies directly inside the notebook
+    - Preferred workflow for launching sweeps today (run cells sequentially to submit/monitor jobs)
+
+2. **`run_pipeline.py`**: Fixed-hyperparameter training pipeline
+    - Uses `aml/components/train.yaml` component for training
+    - Simple pipeline: data_prep → train
+    - Models determined from `configs/train.yaml` → `training.models`
+    - Automatically loads `config.env` for Azure ML configuration
+    - Use for: Quick retraining, production deployments, after HPO
 
 ### Step 12: Test Pipeline Execution
 
@@ -569,7 +569,7 @@ python setup/create_data_asset.py
 python run_pipeline.py
 ```
 
-## Step 15: Deploy Best Model to an Online Endpoint
+### Step 14: Deploy Best Model to an Online Endpoint
 
 1. **Model prep**
    - Point the notebook at the freshest MLflow bundle (`outputs/*_mlflow` or `AML_MLFLOW_BUNDLE_PATH`).
@@ -585,6 +585,5 @@ python run_pipeline.py
 
 ## Future Plans
 
-- **Step 16: Further action**
-  - Decide whether we need scheduled retraining jobs or fully managed batch endpoints for large-scale scoring so model freshness and throughput requirements stay aligned with business SLAs.
-  - Capture additional stakeholder requests before committing to automation.
+- Decide whether we need scheduled retraining jobs or fully managed batch endpoints for large-scale scoring so model freshness and throughput requirements stay aligned with business SLAs.
+- Capture additional stakeholder requests before committing to automation.
