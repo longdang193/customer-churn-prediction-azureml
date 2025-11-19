@@ -5,13 +5,13 @@ This document contains troubleshooting information and solutions for common issu
 ## Table of Contents
 
 - [Environment Setup](#environment-setup)
-- [Azure ML Configuration](#azure-ml-configuration)
+- [Azure ML Workspace Preparation](#azure-ml-workspace-preparation)
 - [Docker & Environment](#docker--environment)
 - [Data Access](#data-access)
 - [MLflow Integration](#mlflow-integration)
-- [Common Errors](#common-errors)
-  - [Python & Environment Errors](#python--environment-errors)
-  - [Azure ML Errors](#azure-ml-errors)
+- [Online Endpoint Deployment Issues](#online-endpoint-deployment-issues)
+- [Notebook Runtime Errors](#notebook-runtime-errors)
+- [Azure ML Service Errors](#azure-ml-service-errors)
   - [HPO (Hyperparameter Optimization) Errors](#hpo-hyperparameter-optimization-errors)
 
 ## Environment Setup
@@ -68,7 +68,7 @@ For Python 3.9 compatibility, these packages have specific version constraints:
 
 ---
 
-## Azure ML Configuration
+## Azure ML Workspace Preparation
 
 ### Required Environment Variables
 
@@ -83,6 +83,29 @@ DATA_VERSION=3
 ```
 
 **Note**: `run_pipeline.py` automatically loads `config.env`. If the file is missing, it falls back to defaults.
+
+### Resource Provider Registration Errors
+
+**Symptom**: `ResourceOperationFailure: Resource provider [N/A] isn't registered with Subscription [N/A]`
+
+**What it means**: The subscription hasn’t registered the Azure resource providers needed by managed online endpoints (e.g., `Microsoft.MachineLearningServices`, `Microsoft.PolicyInsights`, `Microsoft.Cdn`, etc.). Azure won’t provision environments or endpoints until the registration is complete.
+
+**Fix**:
+
+1. Open Azure Portal → **Subscriptions** → select the subscription you deploy into.
+2. Under **Settings**, choose **Resource providers**.
+3. Register every provider that shows `NotRegistered`. At a minimum confirm these are registered:
+   - `Microsoft.MachineLearningServices`
+   - `Microsoft.PolicyInsights`
+   - `Microsoft.Cdn`
+   - `Microsoft.ContainerRegistry`
+   - `Microsoft.Storage`
+   - `Microsoft.KeyVault`
+   - `Microsoft.ManagedIdentity`
+4. Some teams only resolved the error after registering *all* providers surfaced in the list, so if the issue persists, continue registering until none remain unregistered.
+5. Wait a few minutes for the registration to propagate, then retry the deployment (`deploy_online_endpoint.ipynb`, CLI, or Studio).
+
+Reference: [Resource provider isn’t registered with subscription](https://learn.microsoft.com/en-us/answers/questions/2129910/resource-provider-(n-a)-isnt-registered-with-subsc).
 
 ### Compute Cluster Setup
 
@@ -317,11 +340,113 @@ else:
 
 ---
 
-## Common Errors
+## Online Endpoint Deployment Issues
 
-### Python & Environment Errors
+The following failures surfaced while running `notebooks/deploy_online_endpoint.ipynb`.
 
-#### `NameError: name 'PROJECT_ROOT' is not defined` in notebook
+### `FileNotFoundError: No MLflow bundles (*_mlflow/) were found`
+
+**When it happens**: Section 2 of the notebook looks for `outputs/*_mlflow/` (or `AML_MLFLOW_BUNDLE_PATH`) but only finds legacy pickle artifacts.
+
+**Fix**:
+
+- Run `python run_pipeline.py` (or download artifacts from Azure ML) so that `outputs/<model>_mlflow/` exists locally.
+- Set `AML_MLFLOW_BUNDLE_PATH=/abs/path/to/<bundle>_mlflow` before running the notebook if the bundle is elsewhere.
+- The deployment path expects the entire MLflow directory, not just `_model.pkl`.
+
+### `ValidationException: We could not find config.json in: .`
+
+**Cause**: `MLClient.from_config()` expects `config.json`, but this repo stores credentials in `config.env`.
+
+**Fix**:
+
+```python
+from src.utils import load_azure_config
+azure_cfg = load_azure_config()
+ml_client = MLClient(
+    credential,
+    subscription_id=azure_cfg["subscription_id"],
+    resource_group_name=azure_cfg["resource_group"],
+    workspace_name=azure_cfg["workspace_name"],
+)
+```
+
+Ensure `config.env` exists at the repo root and contains the workspace IDs.
+
+### `BadRequest: Specified deployment [...] is in an unrecoverable state`
+
+**Cause**: Reusing an endpoint name that already has a failed deployment slot (`blue`, `green`, etc.).
+
+**Fix**:
+
+- Before creating the endpoint, call `ml_client.online_endpoints.get()` and delete it if `provisioning_state in ["Failed", "Canceled"]`.
+- If the SDK delete hangs, use CLI:
+
+```bash
+az ml online-endpoint delete --name <endpoint> --yes
+az ml online-endpoint show --name <endpoint> --query provisioning_state
+```
+
+Or unset `AML_ONLINE_ENDPOINT_NAME` so the notebook generates a new name.
+
+### `ResourceNotFoundError: ...onlineEndpoints/... could not be found`
+
+**Cause**: Deployment succeeded on a hard-coded endpoint, but the invoke cell used a different timestamp-based name.
+
+**Fix**: Ensure every section uses the same `ENDPOINT_NAME` variable. If you override the env var, update both deployment (Section 6) and invocation (Section 8).
+
+### `BadRequest: Not enough quota available for Standard_DS3_v2`
+
+**Cause**: Default SKU exceeds subscription quota.
+
+**Fix**:
+
+```bash
+export AML_ONLINE_INSTANCE_TYPE=Standard_D2as_v4
+```
+
+Try again with a smaller SKU or open an Azure quota request.
+
+### `ImageBuildFailure: Deployment failed due to no Environment Image available`
+
+**Observed causes**:
+
+- MLflow bundle `conda.yaml` pins Python 3.12 while the Docker image uses Python 3.9.
+- Dependency conflicts (e.g., `mlflow==3.1.4` forcing incompatible `pyarrow`).
+
+**Fix**:
+
+- Re-save/log the model with `conda_env` pinned to Python 3.9 (see `aml/environments/mlflow_conda.yaml`).
+- Update the bundle’s `conda.yaml` + `MLmodel` so `python_version` is 3.9.
+- Download the referenced build log to inspect the exact failure (`az storage blob download ... image_build_log.txt`).
+
+### `(None) POST body should be a JSON dictionary`
+
+**Cause**: Sending a raw JSON array instead of the MLflow pandas structure.
+
+**Fix**: Invoke with `{"input_data": {"columns": [...], "data": [[...]]}}`. The shipped `sample-data.json` already follows this format; Section 8 simply forwards it via `request_file`.
+
+### `(None) A value is not provided for the 'input_data' parameter.` / `TypeError: expected str, bytes or os.PathLike object, not NoneType`
+
+**Cause**: Mixing `input_data` and `request_file` or skipping the setup cell so `PROJECT_ROOT` is undefined.
+
+**Fix**:
+
+- Run the notebook from the top so Section 1 defines `PROJECT_ROOT`.
+- Stick to one invocation style. If you use `request_file`, pass the file path; if you switch to `input_data`, send a dict (e.g., `json.dumps(payload)`), not a path.
+
+### `ValueError: invalid literal for int() with base 10: 'France'`
+
+**Cause**: Payload contains human-readable categorical values, but the model signature expects integer-encoded columns.
+
+**Fix**:
+
+- Encode categorical columns the same way as training (`Geography: France=0, Germany=1, Spain=2`; `Gender: Female=0, Male=1`).
+- Use the curated `sample-data.json` or map values before invocation.
+
+## Notebook Runtime Errors
+
+### `NameError: name 'PROJECT_ROOT' is not defined` in notebook
 
 **Error Message**:
 
@@ -341,7 +466,35 @@ if 'PROJECT_ROOT' not in globals():
 
 **Best Practice**: Use "Run All" or execute cells sequentially from top to bottom to ensure all dependencies are defined.
 
-#### `TypeError: '<' not supported between instances of 'str' and 'int'` when compiling requirements
+### `ModuleNotFoundError: No module named 'src'` in notebooks
+
+**Error Message**:
+
+```text
+ModuleNotFoundError: No module named 'src'
+```
+
+**Cause**: The notebook is being executed from a directory that is not the project root, so Python cannot resolve the `src/` package.
+
+**Solutions**:
+
+1. **Run the setup cell** at the top of each notebook. It changes the working directory to the repo root and appends it to `sys.path`.
+1. **Manually set the working directory** before launching Jupyter:
+
+```bash
+cd /workspaces/customer-churn-prediction-azureml
+jupyter lab
+```
+
+1. **Add the repo root to `PYTHONPATH`** when running in ad-hoc environments:
+
+```bash
+export PYTHONPATH="/workspaces/customer-churn-prediction-azureml:${PYTHONPATH}"
+```
+
+Once the interpreter can see the `src` package, `from src.utils import ...` imports succeed.
+
+### `TypeError: '<' not supported between instances of 'str' and 'int'` when compiling requirements
 
 **Cause**: Outdated setuptools version causing matplotlib build failures
 
@@ -353,15 +506,15 @@ pip install --upgrade pip setuptools wheel
 pip-compile requirements.in -o requirements.txt
 ```
 
-### Azure ML Errors
+## Azure ML Service Errors
 
-#### `Requested 1 nodes but AzureMLCompute cluster only has 0 maximum nodes`
+### `Requested 1 nodes but AzureMLCompute cluster only has 0 maximum nodes`
 
 **Cause**: Compute cluster `max_instances` set to 0
 
 **Solution**: `az ml compute update --name cpu-cluster --set max_instances=2`
 
-#### `Failed to pull Docker image ... This error may occur because the compute could not authenticate`
+### `Failed to pull Docker image ... This error may occur because the compute could not authenticate`
 
 **Error Message**:
 
@@ -375,8 +528,8 @@ Identity with `AcrPull` access to the ACR is assigned to the compute.
 **Causes**:
 
 1. Compute managed identity lacks `AcrPull` permission (compute was created before ACR)
-2. Compute cluster doesn't have system-assigned managed identity enabled
-3. Docker image doesn't exist in ACR
+1. Compute cluster doesn't have system-assigned managed identity enabled
+1. Docker image doesn't exist in ACR
 
 **Solutions**:
 
@@ -392,24 +545,24 @@ docker tag bank-churn:1 $ACR_NAME.azurecr.io/bank-churn:1
 docker push $ACR_NAME.azurecr.io/bank-churn:1
 ```
 
-2. **Fix ACR authentication**:
+1. **Fix ACR authentication**:
 
    - If compute was created before ACR: See [ACR Authentication for Compute Cluster](#acr-authentication-for-compute-cluster) for manual role assignment
    - If compute doesn't have managed identity: Recreate with `--identity-type systemassigned` (see [ACR Authentication for Compute Cluster](#acr-authentication-for-compute-cluster))
 
-#### `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1`
+### `Could not resolve uris of type data for assets azureml://.../bank-churn-raw/versions/1`
 
 **Cause**: Data asset not found or incorrect configuration in `config.env`
 
 **Solution**:
 
 1. Verify `config.env` has correct `DATA_ASSET_FULL` and `DATA_VERSION`
-2. Verify data asset exists: `az ml data show --name <name> --version <version>`
-3. Register data asset if missing (see [Registering Data Asset](#registering-data-asset))
+1. Verify data asset exists: `az ml data show --name <name> --version <version>`
+1. Register data asset if missing (see [Registering Data Asset](#registering-data-asset))
 
-### HPO (Hyperparameter Optimization) Errors
+## HPO (Hyperparameter Optimization) Errors
 
-#### `sklearn.utils._param_validation.InvalidParameterError: The 'min_samples_split' parameter must be an int in the range [2, inf)`
+### `sklearn.utils._param_validation.InvalidParameterError: The 'min_samples_split' parameter must be an int in the range [2, inf)`
 
 **Cause**: Random Forest search space includes `min_samples_split: [1, 2, ...]` which violates sklearn's requirement
 
@@ -421,7 +574,7 @@ search_space:
     min_samples_split: [2, 5, 10]  # Never use 1
 ```
 
-#### `run_sweep_trial.py: error: argument --xgboost_max_depth: expected one argument`
+### `run_sweep_trial.py: error: argument --xgboost_max_depth: expected one argument`
 
 **Error Message**:
 
@@ -448,7 +601,7 @@ command_segments.append(f"--{prefixed_name} ${{{{search_space.{prefixed_name}}}}
 
 This allows Azure ML to inject the sampled values from the search space directly into the command.
 
-#### `ValueError: Invalid override format 'rf_n_estimators=100'`
+### `ValueError: Invalid override format 'rf_n_estimators=100'`
 
 **Error Message**:
 
@@ -469,7 +622,7 @@ This conversion happens automatically when building the CLI arguments for `train
 
 **Verification**: Check that `run_sweep_trial.py` includes the formatting function and uses it when building the `--set` arguments.
 
-#### Best model analysis cell returns "No completed trials yet" despite jobs being completed
+### Best model analysis cell returns "No completed trials yet" despite jobs being completed
 
 **Issue**: The analysis cell in `hpo_manual_trials.ipynb` shows "No completed trials yet" even when sweep jobs have finished.
 
@@ -491,7 +644,7 @@ params = {k: _coerce(v) for k, v in (getattr(child_job, "parameters", {}) or {})
 
 **Note**: The `best_child_run_id` and `score` properties are populated by Azure ML when the sweep completes. If these are `None`, the sweep may still be running or failed.
 
-#### `ml_client.jobs.list(experiment_name=experiment_name)` fails with TypeError
+### `ml_client.jobs.list(experiment_name=experiment_name)` fails with TypeError
 
 **Error Message**:
 
@@ -513,7 +666,7 @@ for job in ml_client.jobs.list():
 
 **Note**: The `load_previous_sweeps()` function in `hpo_manual_trials.ipynb` handles this correctly by iterating through all jobs and filtering by attributes.
 
-#### `max_depth` or other hyperparameters with `null` values cause sweep job failures
+### `max_depth` or other hyperparameters with `null` values cause sweep job failures
 
 **Error Message**:
 

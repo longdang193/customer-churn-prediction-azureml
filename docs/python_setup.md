@@ -58,25 +58,16 @@ brew install python@3.9
 python3.9 --version
 ```
 
-**Option 2: Using pyenv**:
+**Option 2: Using pyenv** (works on macOS and Linux):
 
 ```bash
 # Install pyenv if not already installed
-brew install pyenv
+brew install pyenv  # Linux: see https://github.com/pyenv/pyenv#installation
 
 # Install Python 3.9
 pyenv install 3.9.25
 
 # Set as local version (optional)
-pyenv local 3.9.25
-```
-
-### Alternative: Using pyenv (Cross-platform)
-
-```bash
-# Install pyenv (see https://github.com/pyenv/pyenv#installation)
-# Then install Python 3.9
-pyenv install 3.9.25
 pyenv local 3.9.25
 ```
 

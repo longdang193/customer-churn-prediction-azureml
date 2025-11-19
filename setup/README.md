@@ -1,6 +1,14 @@
 # Setup Scripts and Common Commands
 
-This directory contains setup scripts for Azure ML workspace and compute resources.
+This directory contains setup scripts for Azure ML workspace and compute resources. If you just need the short version, start here:
+
+1. `cp config.env.example config.env` and fill in subscription/workspace names (see [Configuration Setup](#configuration-setup)).
+2. `az login` (or ensure your compute instance already has the right identity).
+3. Run `./setup/setup.sh` (or `.\setup\setup.ps1`) to provision the resource group, workspace, ACR, and compute cluster.
+4. Register your dataset: `python setup/create_data_asset.py --data-path data`.
+5. Verify resources in Azure ML Studio (`https://ml.azure.com`).
+
+The remainder of this document provides the detailed commands and optional variations for those steps.
 
 ## Prerequisites
 

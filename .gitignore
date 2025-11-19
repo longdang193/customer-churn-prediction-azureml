@@ -11,22 +11,6 @@ __pycache__/
 *.pyd
 .Python
 
-# Data & Output Files
-data/churn.csv
-data/processed*
-data/test_scoring.csv
-
-# Model & Evaluation Artifacts
-models/
-evaluation/
-predictions/
-
-# Generic artifact types
-*.pkl
-*.joblib
-*.h5
-*.pt
-
 # Notebooks
 .ipynb_checkpoints/
 *.ipynb_checkpoints

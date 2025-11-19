@@ -6,12 +6,16 @@ This document outlines the plan and structure for building the Bank Customer Chu
 
 ```text
 .
+├── Job_train_job_OutputsAndLogs/      # Downloaded AML job logs & artifacts
 ├── aml/
 │   ├── components/
 │   │   ├── data_prep.yaml
-│   │   └── train.yaml          # Regular training component (fixed hyperparameters)
+│   │   └── train.yaml                 # Regular training component (fixed hyperparameters)
 │   └── environments/
-│       └── environment.yml     # Azure ML environment definition (Docker image reference)
+│       └── environment.yml            # Azure ML environment definition (Docker image reference)
+├── artifacts/
+│   └── mlflow_online_model/           # Latest packaged model for endpoint deployments
+├── architecture.canvas                # Architecture diagram (VS Code canvas)
 ├── configs/
 │   ├── data.yaml
 │   ├── hpo.yaml
@@ -20,44 +24,53 @@ This document outlines the plan and structure for building the Bank Customer Chu
 ├── data/
 │   └── README.md
 ├── docs/
-│   ├── MASTER_PLAN.md          # This file - project plan and guide
-│   ├── TROUBLESHOOTING.md      # Troubleshooting guide for common issues
+│   ├── MASTER_PLAN.md                 # This file - project plan and guide
+│   ├── TROUBLESHOOTING.md             # Troubleshooting guide for common issues
 │   ├── dependencies.md
 │   ├── pipeline_guide.md
 │   ├── python_setup.md
 │   └── setup_guide.md
+├── logs/
+│   └── artifacts/                     # Local copies of AML job logs/artifacts
+├── mlruns/                            # Local MLflow tracking store
 ├── notebooks/
-│   ├── eda.ipynb               # Exploratory data analysis
-│   └── hpo_manual_trials.ipynb # Manual HPO sweep orchestration in Azure ML
+│   ├── deploy_online_endpoint.ipynb   # Managed online endpoint deployment workflow
+│   ├── eda.ipynb                      # Exploratory data analysis
+│   └── hpo_manual_trials.ipynb        # Manual HPO sweep orchestration in Azure ML
+├── outputs/
+│   ├── model_output/                  # Latest pipeline output bundle(s)
+│   └── xgboost_mlflow/                # Current MLflow model directory
+├── sample-data.json                   # Request payload for online endpoint smoke tests
 ├── setup/
-│   ├── create_data_asset.py    # Script to create Azure ML data assets
-│   ├── setup.sh                # Bash script for Azure ML resource setup
-│   ├── setup.ps1               # PowerShell script for Azure ML resource setup
-│   └── README.md               # Setup documentation
+│   ├── create_data_asset.py           # Script to create Azure ML data assets
+│   ├── setup.sh                       # Bash script for Azure ML resource setup
+│   ├── setup.ps1                      # PowerShell script for Azure ML resource setup
+│   └── README.md                      # Setup documentation
 ├── src/
-│   ├── data/                   # Data processing utilities
-│   ├── models/                 # Model definitions (logreg, rf, xgboost)
-│   ├── training/               # Training utilities
-│   ├── utils/                  # Utility modules
-│   │   ├── azure_config.py     # Azure ML configuration loading
-│   │   ├── config_loader.py    # YAML configuration loading
-│   │   ├── env_loader.py       # Environment variable loading
-│   │   ├── mlflow_utils.py     # MLflow integration utilities
+│   ├── data/                          # Data processing utilities
+│   ├── models/                        # Model definitions (logreg, rf, xgboost)
+│   ├── training/                      # Training utilities
+│   ├── utils/                         # Utility modules
+│   │   ├── azure_config.py            # Azure ML configuration loading
+│   │   ├── config_loader.py           # YAML configuration loading
+│   │   ├── env_loader.py              # Environment variable loading
+│   │   ├── mlflow_utils.py            # MLflow integration utilities
 │   │   └── ...
-│   ├── data_prep.py            # Data preprocessing script
-│   ├── run_sweep_trial.py      # Helper script for HPO sweep trials
-│   ├── train.py                # Model training script
+│   ├── data_prep.py                   # Data preprocessing script
+│   ├── run_sweep_trial.py             # Helper script for HPO sweep trials
+│   ├── train.py                       # Model training script
 │   └── README.md
-├── config.env                  # Environment configuration (not in git)
-├── config.env.example          # Example environment configuration template
-├── Dockerfile                  # Docker image definition
-├── hpo_utils.py                # Hyperparameter optimization utilities
-├── run_pipeline.py             # Regular training pipeline orchestration script
-├── README.md                   # Project overview
-├── requirements.in             # Core dependencies (source)
-├── requirements.txt            # Core dependencies (pinned)
-├── dev-requirements.in         # Development dependencies (source)
-└── dev-requirements.txt        # Development dependencies (pinned)
+├── config.env                         # Environment configuration (not in git)
+├── config.env.example                 # Example environment configuration template
+├── Dockerfile                         # Docker image definition
+├── hpo_utils.py                       # Hyperparameter optimization utilities
+├── run_pipeline.py                    # Regular training pipeline orchestration script
+├── README.md                          # Project overview
+├── requirements.in                    # Core dependencies (source)
+├── requirements.txt                   # Core dependencies (pinned)
+├── dev-requirements.in                # Development dependencies (source)
+├── dev-requirements.txt               # Development dependencies (pinned)
+└── venv/                              # Local virtual environment (gitignored)
 ```
 
 ---
@@ -125,8 +138,7 @@ See [[setup/README.md]].
 
 1. **Create `data/` directory** (if it doesn't exist).
 2. **Add dataset files**:
-    - `sample.csv` - Sample dataset (1,000 rows) for local development (tracked in git)
-    - `churn.csv` - Full dataset (10,000 rows) for Azure ML pipelines (excluded from git via `.gitignore`)
+    - `churn.csv` - Primary dataset (~10k rows) used for both local development and Azure ML pipelines
     - See `data/README.md` for dataset details and usage
 3. **Upload dataset to Azure ML as a data asset**:
     - Use the setup script or Azure ML CLI to register the dataset
@@ -557,107 +569,22 @@ python setup/create_data_asset.py
 python run_pipeline.py
 ```
 
-#### Typical Production Workflow Summary
+## Step 15: Deploy Best Model to an Online Endpoint
 
-1. **Initial Setup**: Run HPO in notebook → Export best config in notebook → Run production pipeline (from notebook or CLI)
-2. **Regular Retraining**: Update data → Run production pipeline (skip HPO)
-3. **Periodic Re-optimization**: Run HPO in notebook → Export best config in notebook → Run production pipeline
-
-**Time Estimates**:
-
-- HPO sweep: 30-60 minutes (depending on `max_trials`)
-- Production training: 5-15 minutes
-- Total initial setup: ~1-2 hours
-
----
-
-## Pipeline Entry Points
-
-### `notebooks/hpo_manual_trials.ipynb` - Hyperparameter Optimization
-
-- End-to-end notebook workflow for building and submitting Azure ML sweeps
-- Loads `configs/hpo.yaml` via `hpo_utils.py` to construct per-model search spaces
-- Uses `src/run_sweep_trial.py` → `train.py` to run each sampled configuration with `--set model.param=value`
-- Provides interactive monitoring output (job names, Studio links, chosen hyperparameters)
-- **Analyze Results**: Built-in cell to find the best model across all sweeps
-- **Export Config**: Automatically exports best model configuration to `configs/train.yaml` with proper YAML formatting
-- **Run Pipeline**: Optional cell to run training pipeline directly from the notebook
-- **Use when**: First-time optimization, tuning new search spaces, or validating sweep fixes
-- **Outputs**: Azure ML sweep jobs with logged metrics/params per child run, plus exported `configs/train.yaml` for production training
-
-### `run_pipeline.py` - Fixed-Hyperparameter Training
-
-- Uses `aml/components/train.yaml` component for training
-- Trains models specified in `configs/train.yaml` → `training.models`
-- Uses hyperparameters from `configs/train.yaml` → `training.hyperparameters`
-- Fast execution (no sweep overhead)
-- Simple pipeline: data_prep → train
-- Automatically loads `config.env` for Azure ML configuration
-- **Use when**: Quick retraining, production deployments, after HPO
-- **Outputs**: Trained model artifacts and MLflow run ID
-
-### Typical Workflow
-
-See [Step 13: Production Workflow](#step-13-production-workflow---run-pipeline-with-optimized-hyperparameters) for detailed instructions.
-
-**Quick Summary**:
-
-1. Use `notebooks/hpo_manual_trials.ipynb` to find best hyperparameters (uses Azure ML sweeps + `run_sweep_trial.py`)
-2. In the notebook, run the "Analyze Results" cell to find the best model, then run the "Export Best Model Configuration" cell
-   - This automatically updates `configs/train.yaml` with best model and hyperparameters
-   - Sets `models: [best_model]` to train only the best model
-   - Ensures proper YAML formatting with quoted string values
-3. Run the "Run Training Pipeline" cell in the notebook, or run `run_pipeline.py` from command line
-   - Both use the exported `configs/train.yaml` configuration
-
-**For subsequent retraining**: Simply run `run_pipeline.py` with updated data (skip HPO unless re-optimization is needed).
-
----
-
-## Hyperparameter Strategy
-
-- **HPO Approach**: `model_type` is treated as a categorical hyperparameter
-  - Each trial trains only one model type (logreg, rf, or xgboost)
-  - Model-specific hyperparameters included conditionally based on `model_type`
-  - Efficient: 1 model per trial (3x reduction in compute cost)
-  - Best model type logged as `model_type` tag in MLflow
-
-- **Model Logging**: Models logged with MLflow including:
-  - `pip_requirements`: Embedded dependencies for portability
-  - `signature`: Model input/output schema
-  - `input_example`: Sample input for testing
-  - Azure ML deployment uses registered environment (`azureml:bank-churn-env:1`)
-
----
-
-## Implementation Details
-
-### Model Training & Logging
-
-- Three models supported: Logistic Regression (`logreg`), Random Forest (`rf`), XGBoost (`xgboost`)
-- **Model Selection**:
-  - Regular mode: Models determined from `configs/train.yaml` → `training.models`
-  - HPO mode: Single model type specified via `--model-type` CLI argument
-- Models saved as pickle files in Azure ML (automatically captured as artifacts)
-- Models logged to MLflow with metrics, parameters, and tags
-- Models support MLflow pyfunc deployment (no custom scoring script needed)
-
-### Deployment Strategy
-
-- **MLflow pyfunc deployment**: Models deployed directly to Azure ML online endpoints
-- **Dual environment support**:
-  - Azure ML deployment: Uses registered environment (`azureml:bank-churn-env:1`)
-  - Local serving: Uses embedded `pip_requirements` (e.g., `mlflow models serve`)
-
----
+1. **Model prep**
+   - Point the notebook at the freshest MLflow bundle (`outputs/*_mlflow` or `AML_MLFLOW_BUNDLE_PATH`).
+   - Register that bundle as a versioned model asset (`MODEL_NAME`) so Azure ML can track lineage.
+2. **Endpoint lifecycle**
+   - Reuse an existing endpoint name (`ACL_ONLINE_ENDPOINT_NAME`) or let the notebook generate one.
+   - Clean up failed/stuck endpoints automatically before creating the new one.
+   - Deploy the registered model to the endpoint using a quota-friendly SKU (configurable via env vars).
+3. **Smoke test & troubleshooting**
+   - Invoke the endpoint with `sample-data.json` to confirm end-to-end scoring.
+   - Capture any quota, image-build, or stuck-resource issues along with their CLI cleanup commands.
+   - Record these findings for SRE playbooks before promoting the deployment to staging/production.
 
 ## Future Plans
 
-- **Step 14: Add a Makefile** for common commands
-- **Step 15: Implement staging/prod deployment** with promotion control
-  - Create `deploy.py` with staging/prod support
-  - Add `--stage` flag to `run_pipeline.py --deploy`
-  - Implement smoke tests and promotion workflow
-- **Step 16: Add scheduled pipeline execution**
-  - Create `schedule_pipeline.py` for Azure ML Schedule management
-  - Support daily, weekly, monthly, and cron-based schedules
+- **Step 16: Further action**
+  - Decide whether we need scheduled retraining jobs or fully managed batch endpoints for large-scale scoring so model freshness and throughput requirements stay aligned with business SLAs.
+  - Capture additional stakeholder requests before committing to automation.

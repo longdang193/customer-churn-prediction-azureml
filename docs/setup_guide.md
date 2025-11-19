@@ -11,13 +11,22 @@ git clone https://github.com/your-username/customer-churn-prediction-azureml.git
 cd customer-churn-prediction-azureml
 ```
 
-### 2. Install Dependencies
+### 2. Create the Python 3.9 Environment and Install Dependencies
 
-Install the required Python packages using the provided `requirements.txt` file.
+> Detailed OS-specific instructions live in `docs/python_setup.md`. The quick version is below.
 
 ```bash
+# Create & activate a Python 3.9 virtual environment
+python3.9 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install tooling and sync pinned requirements
+pip install --upgrade pip pip-tools
 pip install -r requirements.txt
+pip install -r dev-requirements.txt  # optional for local development tooling
 ```
+
+Only run `pip-compile` if you change the `.in` files; see `docs/dependencies.md` for the full workflow.
 
 ### 3. Running the EDA Notebook
 
@@ -69,22 +78,27 @@ Log in to the Azure CLI:
 az login
 ```
 
-### 3. Create Azure ML Data Asset
+### 3. Create the Azure ML Data Asset
 
-**Important**: The data asset must be registered as `uri_folder` type (directory containing CSV file(s)). The `data_prep` component will automatically load and concatenate all CSV files in the folder.
-
-Register the data asset using Azure CLI:
+The churn pipeline expects the dataset to be registered as a `uri_folder` so the `data_prep` component can automatically load all CSV files. Use the provided helper script to register (reads names/versions from `config.env`):
 
 ```bash
-az ml data upload \
+python setup/create_data_asset.py \
+  --data-path data/churn.csv \
+  --name "$DATA_ASSET_FULL" \
+  --version "$DATA_VERSION"
+```
+
+If you prefer the CLI, the equivalent command is:
+
+```bash
+az ml data create \
   --name churn-data \
   --version 3 \
   --path data/ \
   --type uri_folder \
-  --resource-group <resource-group> \
-  --workspace-name <workspace-name>
+  --resource-group $AZURE_RESOURCE_GROUP \
+  --workspace-name $AZURE_WORKSPACE_NAME
 ```
 
-Replace `<resource-group>` and `<workspace-name>` with your values, or use the values from `config.env`.
-
-**Note**: The data asset name and version should match `DATA_ASSET_FULL` and `DATA_VERSION` in your `config.env` file. The pipeline scripts use `get_data_asset_config()` to automatically load these values.
+Keep the `name`/`version` aligned with `DATA_ASSET_FULL` and `DATA_VERSION`; `run_pipeline.py` and the notebooks read these values via `get_data_asset_config()`.

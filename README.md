@@ -1,197 +1,131 @@
 # Bank Customer Churn Prediction with Azure ML
 
-This repo delivers a configuration-driven Azure ML workflow for bank customer churn prediction. Hyperparameter tuning now runs straight from the `notebooks/hpo_manual_trials.ipynb` notebook on an Azure ML compute instance, while MLflow tracks every trial so you can evaluate, promote, and score the best model with confidence.
+Configuration-driven Azure ML workflow for bank customer churn prediction. Hyperparameter tuning runs from `notebooks/hpo_manual_trials.ipynb` on an Azure ML compute instance; MLflow captures every trial so you can evaluate, promote, and deploy the best model.
 
 ## Project Overview
 
-- **Problem**: binary classification of bank customers into churn / retain classes.
-- **Models**: Supports three models - Logistic Regression (`logreg`), Random Forest (`rf`), and XGBoost (`xgboost`)
-- **Approach**: open `notebooks/hpo_manual_trials.ipynb` on your Azure ML compute instance and execute the notebook to iterate through the search space defined in `configs/hpo.yaml`, logging each trial to MLflow.
-- **Follow-up**: after the notebook finishes, extract or copy the best hyperparameters and train the optimized model. Models are saved as pickle files and can be deployed.
+- **Objective**: Predict whether a bank customer will churn (binary classification) using structured tabular features.
+- **Model zoo**: Logistic Regression (`logreg`), Random Forest (`rf`), and XGBoost (`xgboost`) with shared preprocessing and MLflow logging.
+- **Optimization path**: Run `notebooks/hpo_manual_trials.ipynb` on an Azure ML compute instance to submit sweeps defined in `configs/hpo.yaml`; the notebook exports the best configuration back into `configs/train.yaml`.
+- **Production retraining**: Execute `run_pipeline.py` (or its notebook cell) to run the data prep → train pipeline end to end with the optimized settings, producing both pickle and MLflow artifacts under `outputs/`.
+- **Deployment**: `notebooks/deploy_online_endpoint.ipynb` registers the MLflow bundle and deploys it to a managed online endpoint, with `sample-data.json` providing an encoded smoke-test payload.
 
 ### Key Features
 
-- **Notebook-driven HPO** – orchestrate one trial per cell execution directly from `hpo_manual_trials.ipynb`
-- **Pipeline for retraining** – keep `run_pipeline.py` for fast, single-shot retraining once the best configuration is known
-- **Configuration driven** – YAML files in `configs/` centralize data prep, training defaults, MLflow settings, and the HyperDrive search space
-- **MLflow integration** – each trial logs parameters, metrics (e.g. `f1`), and artifacts, enabling reproducible model promotion
-- **Robust preprocessing** – shared utilities ensure the same feature engineering is applied during training and inference
-- **Reproducible environment** – a Dockerfile and pinned `requirements.txt` make local, Docker, and AML environments consistent
+- **HPO** – submit and monitor Azure ML sweeps from `notebooks/hpo_manual_trials.ipynb`.
+- **Production retraining pipeline** – `run_pipeline.py` reuses the best config for fast, fixed-hyperparameter runs (data prep → train).
+- **Managed online endpoint playbook** – `notebooks/deploy_online_endpoint.ipynb` registers MLflow bundles, deploys, smoke-tests, and cleans up endpoints.
+- **Centralized configuration** – `configs/*.yaml` govern data prep, training defaults, MLflow settings, and sweep budgets for every workflow.
+- **MLflow-first logging** – each trial/run captures parameters, metrics (F1, ROC-AUC, etc.), signatures, and artifacts for reproducibility.
+- **Reproducible environments** – Dockerfile + pinned requirements keeps local, Docker, and Azure ML environments aligned; `aml/environments/environment.yml` mirrors the same image.
 
 ## Project Structure
 
-```
+```text
 .
+├── Job_train_job_OutputsAndLogs/      # Downloaded AML job logs & artifacts
 ├── aml/
-│   └── components/              # Azure ML component definitions
-│       ├── data_prep.yaml      # Data preprocessing component
-│       ├── extract_best_params.yaml  # Extract best params component
-│       └── train.yaml          # Training component (regular training with fixed hyperparameters)
-├── configs/                     # Configuration files
-│   ├── data.yaml               # Data preparation settings
-│   ├── hpo.yaml                # Hyperparameter optimization (test/production)
-│   ├── mlflow.yaml             # MLflow tracking configuration
-│   ├── train.yaml              # Training config (best model + hyperparameters)
-│   └── README.md               # Config documentation
-├── data/                       # Data directory (local artifacts, gitignored)
-├── docs/                       # Documentation
-│   ├── MLZoomcamp-Project1-ProjectPlan-v2.md
+│   ├── components/
+│   │   ├── data_prep.yaml
+│   │   └── train.yaml                 # Regular training component (fixed hyperparameters)
+│   └── environments/
+│       └── environment.yml            # Azure ML environment definition (Docker image reference)
+├── artifacts/
+│   └── mlflow_online_model/           # Latest packaged model for endpoint deployments
+├── architecture.canvas                # Architecture diagram (VS Code canvas)
+├── configs/
+│   ├── data.yaml
+│   ├── hpo.yaml
+│   ├── mlflow.yaml
+│   └── train.yaml
+├── data/
+│   └── README.md
+├── docs/
+│   ├── MASTER_PLAN.md                 # This file - project plan and guide
+│   ├── TROUBLESHOOTING.md             # Troubleshooting guide for common issues
 │   ├── dependencies.md
 │   ├── pipeline_guide.md
-│   ├── setup_guide.md
-│   └── TROUBLESHOOTING.md
-├── notebooks/                  # Jupyter notebooks
-│   ├── hpo_manual_trials.ipynb  # Notebook-based HPO workflow for compute instances
-│   └── eda.ipynb
-├── src/                        # Source code
-│   ├── config_loader.py        # Configuration loading utilities
-│   ├── data_prep.py            # Data preprocessing script
-│   ├── extract_best_params.py  # Extract best params from HPO and update config
-│   ├── train.py                # Model training script
-│   ├── models/                 # Model definitions (logreg, rf, xgboost)
-│   └── README.md               # Source code documentation
-├── setup/                      # Setup scripts
-│   ├── setup.sh/.ps1          # Initial Azure ML setup
-│   └── README.md               # Common Azure ML commands
-├── hpo_utils.py                # HPO configuration utilities
-├── run_pipeline.py             # Submit training pipeline
-├── config.env.example          # Example environment configuration
-├── Dockerfile                  # Docker image definition
-├── requirements.in             # Python dependencies (source)
-├── requirements.txt            # Python dependencies (pinned)
-├── dev-requirements.in         # Development dependencies (source)
-└── dev-requirements.txt        # Development dependencies (pinned)
+│   ├── python_setup.md
+│   └── setup_guide.md
+├── logs/
+│   └── artifacts/                     # Local copies of AML job logs/artifacts
+├── mlruns/                            # Local MLflow tracking store
+├── notebooks/
+│   ├── deploy_online_endpoint.ipynb   # Managed online endpoint deployment workflow
+│   ├── eda.ipynb                      # Exploratory data analysis
+│   └── hpo_manual_trials.ipynb        # Manual HPO sweep orchestration in Azure ML
+├── outputs/
+│   ├── model_output/                  # Latest pipeline output bundle(s)
+│   └── xgboost_mlflow/                # Current MLflow model directory
+├── sample-data.json                   # Request payload for online endpoint smoke tests
+├── setup/
+│   ├── create_data_asset.py           # Script to create Azure ML data assets
+│   ├── setup.sh                       # Bash script for Azure ML resource setup
+│   ├── setup.ps1                      # PowerShell script for Azure ML resource setup
+│   └── README.md                      # Setup documentation
+├── src/
+│   ├── data/                          # Data processing utilities
+│   ├── models/                        # Model definitions (logreg, rf, xgboost)
+│   ├── training/                      # Training utilities
+│   ├── utils/                         # Utility modules
+│   │   ├── azure_config.py            # Azure ML configuration loading
+│   │   ├── config_loader.py           # YAML configuration loading
+│   │   ├── env_loader.py              # Environment variable loading
+│   │   ├── mlflow_utils.py            # MLflow integration utilities
+│   │   └── ...
+│   ├── data_prep.py                   # Data preprocessing script
+│   ├── run_sweep_trial.py             # Helper script for HPO sweep trials
+│   ├── train.py                       # Model training script
+│   └── README.md
+├── config.env                         # Environment configuration (not in git)
+├── config.env.example                 # Example environment configuration template
+├── Dockerfile                         # Docker image definition
+├── hpo_utils.py                       # Hyperparameter optimization utilities
+├── run_pipeline.py                    # Regular training pipeline orchestration script
+├── README.md                          # Project overview
+├── requirements.in                    # Core dependencies (source)
+├── requirements.txt                   # Core dependencies (pinned)
+├── dev-requirements.in                # Development dependencies (source)
+├── dev-requirements.txt               # Development dependencies (pinned)
+└── venv/                              # Local virtual environment (gitignored)
 ```
 
-**Note**: The following folders contain local artifacts and are gitignored:
-
-- `data/processed*` - Processed data outputs
-- `evaluation/` - Evaluation outputs
-- `models/` - Trained model artifacts
-- `predictions/` - Prediction outputs
-- `logs/` - Log files
-- `mlruns/` - MLflow local tracking data
-
-## Getting Started
+## What’s Implemented So Far
 
 ### 1. Environment Setup
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone <repo-url>
 cd customer-churn-prediction-azureml
 
-# (Optional) create a virtual environment
-python -m venv .venv && source .venv/bin/activate
+# Create a Python 3.9 virtual environment (matches docker + AML images)
+python3.9 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
+pip install -r dev-requirements.txt  # optional tooling (ruff, black, etc.)
 ```
 
-### 2. Configure Azure ML
+### 2. Azure ML Configuration
 
-Create a `config.env` file with your workspace details:
-
-```bash
-AZURE_SUBSCRIPTION_ID=<subscription>
-AZURE_RESOURCE_GROUP=<resource-group>
-AZURE_WORKSPACE_NAME=<workspace>
-DATA_ASSET_FULL=<data-asset-name>
-DATA_VERSION=<data-version>
-```
-
-Authenticate with Azure (`az login`) before submitting jobs.
-
-**Note**:
-
-- Data is loaded from Azure ML data assets. Configure the data asset name and version in `config.env`.
-- `run_pipeline.py` automatically loads `config.env`, and the `hpo_manual_trials.ipynb` notebook calls `load_dotenv`, so you usually don't need to source it manually (though you can if you prefer).
+`config.env` stores the workspace, resource group, ACR, and data asset names that all scripts/notebooks consume via `load_azure_config()`. Copy `config.env.example`, fill in your values, then authenticate with `az login`. No additional sourcing is required.
 
 ### 3. Configuration Files
 
-The project uses YAML configuration files in `configs/`:
+`configs/data.yaml`, `train.yaml`, `hpo.yaml`, and `mlflow.yaml` drive data prep, training defaults, sweep budgets, and experiment naming. The notebook exports the winning HPO settings back into `train.yaml`, and `run_pipeline.py` consumes the same file for production retraining.
 
-- **`hpo.yaml`** – Hyperparameter optimization settings (test/production sections)
-- **`train.yaml`** – Training configuration with best model and hyperparameters (test/production sections)
-- **`data.yaml`** – Data preparation settings
-- **`mlflow.yaml`** – MLflow tracking configuration
+### 4. Workflow Delivered
 
-**Important**: Both `hpo.yaml` and `train.yaml` have test and production sections. Uncomment the section you want to use.
+1. **HPO** – `notebooks/hpo_manual_trials.ipynb` submits Azure ML sweeps defined in `configs/hpo.yaml`, logs every trial to MLflow, and exports the best config to `configs/train.yaml`.
+2. **Production retraining** – `run_pipeline.py` (or its notebook cell) runs the data_prep → train pipeline with the exported settings, producing pickle + MLflow artifacts under `outputs/`.
+3. **Managed online endpoint** – `notebooks/deploy_online_endpoint.ipynb` discovers the newest MLflow bundle, registers it, deploys to a managed endpoint, and verifies predictions with `sample-data.json`.
 
-### 4. Typical Workflow
+Together these steps complete the train → optimize → deploy loop already implemented in this repo.
 
-#### Step 1: Run HPO (Find Best Model and Hyperparameters)
-
-```bash
-python run_hpo.py
-```
-
-This will:
-
-- Run a HyperDrive sweep using the `hpo.yaml` component
-- Each trial trains one model type (from the search space in `configs/hpo.yaml`) with sampled hyperparameters
-- Models to optimize are specified in `configs/hpo.yaml` → `search_space` (e.g., `rf`, `xgboost`)
-- Selects the best trial based on the configured metric (default: F1 score)
-- Logs all trials to MLflow
-
-**After HPO completes:**
-
-1. Get the parent run ID from Azure ML Studio (the sweep job run ID)
-2. Extract best hyperparameters and update config:
-
-   ```bash
-   python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
-   ```
-
-   This automatically:
-   - Extracts best hyperparameters from the HPO sweep
-   - Updates `configs/train.yaml` with the best model and hyperparameters
-   - Sets `models: [best_model]` (only one model)
-
-#### Step 2: Train Best Model (After HPO)
-
-```bash
-python run_pipeline.py
-```
-
-This will:
-
-- Use the best model and hyperparameters from `configs/train.yaml` (updated in Step 1)
-- Run data prep → train pipeline using the `train.yaml` component
-- Train models specified in `configs/train.yaml` → `training.models` (should be only the best model after HPO)
-- Save the trained model as a pickle file
-- Fast single run (no HPO overhead)
-- Perfect for production retraining
-
-**Note**: The `train.yaml` config file should contain only the best model from HPO. The `extract_best_params.py` script automatically sets `models: [best_model]` in the config.
-
-### 5. Configuration: Test vs Production
-
-Both `configs/hpo.yaml` and `configs/train.yaml` have test and production sections:
-
-**For Testing:**
-
-- Smaller budgets (fewer trials)
-- Limited search spaces
-- Faster execution
-
-**For Production:**
-
-- Larger budgets (more trials)
-- Comprehensive search spaces
-- Better optimization
-
-Switch between them by commenting/uncommenting the appropriate section in each file.
-
-### 6. Deploy and Score Models
-
-Models are saved as pickle files during training and can be deployed:
-
-- **Model files**: Saved to Azure ML outputs directory during training
-- **MLflow tracking**: All runs are tracked in MLflow for experiment management
-- **Model artifacts**: Models and metadata are automatically captured by Azure ML
-
-### 7. Inspect Experiments with MLflow
+### 5. Inspect Experiments with MLflow
 
 If you mirror the MLflow tracking URI locally, launch the UI to explore runs:
 
@@ -201,12 +135,11 @@ mlflow ui --backend-store-uri "${MLFLOW_TRACKING_URI}" --port 5000
 
 ## Running on Azure ML
 
-All pipelines load component specs from `aml/components/` and read configuration from:
+- **Notebook-driven HPO**: `notebooks/hpo_manual_trials.ipynb` builds sweeps from `configs/hpo.yaml`, registers `aml/components/data_prep.yaml` + `train.yaml`, and logs results to MLflow.
+- **Fixed-hyperparameter pipeline**: `run_pipeline.py` submits the training component (`aml/components/train.yaml`) using settings from `configs/train.yaml`.
+- **Online deployment**: `notebooks/deploy_online_endpoint.ipynb` registers the MLflow bundle and deploys it to a managed endpoint.
 
-- **HPO Pipeline** (`run_hpo.py`): Uses `aml/components/hpo.yaml` component and `configs/hpo.yaml` for sweep configuration
-- **Regular Pipeline** (`run_pipeline.py`): Uses `aml/components/train.yaml` component and `configs/train.yaml` for training configuration
-
-Both pipelines automatically load `config.env` for Azure ML workspace and data asset configuration.
+All flows source workspace/data settings from `config.env`.
 
 ## Documentation
 
@@ -218,27 +151,11 @@ Both pipelines automatically load `config.env` for Azure ML workspace and data a
 
 ## Quick Reference
 
-**HPO Workflow:**
+**HPO > Train > Deploy (summary):**
 
-```bash
-# 1. Run HPO (uses hpo.yaml component)
-python run_hpo.py
-
-# 2. Extract best params and update config (after HPO completes)
-python src/extract_best_params.py --parent-run-id <PARENT_RUN_ID>
-
-# 3. Train best model (uses train.yaml component)
-python run_pipeline.py
-```
-
-**Note**: Both scripts automatically load `config.env` for Azure ML configuration. No need to source it manually.
-
-**Optional flags for `extract_best_params.py`:**
-
-- `--output <file>` – Save params to JSON file (optional)
-- `--no-update-config` – Skip config update (extract only)
-- `--dry-run` – Preview changes without updating
-- `--config <path>` – Specify config file (default: `configs/train.yaml`)
+1. `notebooks/hpo_manual_trials.ipynb` → submit sweeps, export best config.
+2. `python run_pipeline.py` → run production training.
+3. `notebooks/deploy_online_endpoint.ipynb` → register + deploy MLflow bundle, smoke test predictions.
 
 ---
 
