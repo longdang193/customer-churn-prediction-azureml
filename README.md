@@ -223,8 +223,8 @@ Together these deliverables cover the optimize → retrain → deploy loop curre
 | **Reproducibility**     | Dataset (`data/churn.csv`) and model artifacts (`outputs/*`) are versioned. README documents environment setup, configuration, and pipeline execution for both local and AML runs.                                                         |
 | **Model deployment**    | `notebooks/deploy_online_endpoint.ipynb` registers MLflow bundles, provisions AML managed endpoints, and exposes invocation commands with `sample-data.json`.                                                                              |
 | **Dependencies & env**  | `requirements*.txt`, Dockerfile, and the virtual-env instructions in “What’s Implemented So Far” describe installation/activation, satisfying the top tier.                                                                                |
-| **Containerization**    | Dockerfile builds the runtime image used locally and in Azure ML; instructions below show how to build/run/tag/push it.                                                                                                                    |
-| **Cloud deployment**    | The deployment notebook is code-first documentation for pushing the model to Azure ML (cloud) and testing the public endpoint; the README links to it directly.                                                                            |
+| **Containerization**    | Dockerfile builds the runtime image used locally and in Azure ML.                                                                                                               |
+| **Cloud deployment**    | The deployment notebook is code-first documentation for pushing the model to Azure ML (cloud) and testing the public endpoint.                                                                           |
 
 ---
 
