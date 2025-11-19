@@ -2,6 +2,24 @@
 
 Configuration-driven Azure ML workflow for bank customer churn prediction. Hyperparameter tuning runs from `notebooks/hpo_manual_trials.ipynb` on an Azure ML compute instance; MLflow captures every trial so you can evaluate, promote, and deploy the best model.
 
+---
+
+## Table of Contents
+
+1. [Project Overview](#project-overview)
+2. [Key Features](#key-features)
+3. [Project Structure](#project-structure)
+4. [Exploratory Data Analysis](#exploratory-data-analysis)
+5. [What’s Implemented So Far](#whats-implemented-so-far)
+6. [Evaluation Criteria Checklist](#evaluation-criteria-checklist)
+7. [Running on Azure ML](#running-on-azure-ml)
+8. [Documentation](#documentation)
+9. [Docker Usage](#docker-usage)
+10. [Tech Stack](#tech-stack)
+11. [Project Limitations & Future Work](#project-limitations--future-work)
+
+---
+
 ## Project Overview
 
 - **Objective**: Predict whether a bank customer will churn (binary classification) using structured tabular features.
@@ -9,6 +27,8 @@ Configuration-driven Azure ML workflow for bank customer churn prediction. Hyper
 - **Optimization path**: Run `notebooks/hpo_manual_trials.ipynb` on an Azure ML compute instance to submit sweeps defined in `configs/hpo.yaml`; the notebook exports the best configuration back into `configs/train.yaml`.
 - **Production retraining**: Execute `run_pipeline.py` (or its notebook cell) to run the data prep → train pipeline end to end with the optimized settings, producing both pickle and MLflow artifacts under `outputs/`.
 - **Deployment**: `notebooks/deploy_online_endpoint.ipynb` registers the MLflow bundle and deploys it to a managed online endpoint, with `sample-data.json` providing an encoded smoke-test payload.
+
+---
 
 ### Key Features
 
@@ -18,6 +38,8 @@ Configuration-driven Azure ML workflow for bank customer churn prediction. Hyper
 - **Centralized configuration** – `configs/*.yaml` govern data prep, training defaults, MLflow settings, and sweep budgets for every workflow.
 - **MLflow-first logging** – each trial/run captures parameters, metrics (F1, ROC-AUC, etc.), signatures, and artifacts for reproducibility.
 - **Reproducible environments** – Dockerfile + pinned requirements keeps local, Docker, and Azure ML environments aligned; `aml/environments/environment.yml` mirrors the same image.
+
+---
 
 ## Project Structure
 
@@ -90,16 +112,34 @@ Configuration-driven Azure ML workflow for bank customer churn prediction. Hyper
 └── venv/                              # Local virtual environment (gitignored)
 ```
 
+---
+
+## Exploratory Data Analysis
+
+`notebooks/eda.ipynb` covers the initial exploration of the 10,000-row churn dataset:
+
+- **Class balance**: ~20% churn vs. 80% non-churn, motivating stratified train/test splits and SMOTE toggles in `configs/train.yaml`.
+- **Feature insights**:
+  - Higher churn among older customers with low product usage or inactive accounts.
+  - `Geography` and `Gender` show skewed distributions (France dominates), so we encode categoricals and monitor leakage.
+  - `Balance`, `EstimatedSalary`, and `CreditScore` exhibit wide ranges, supporting standardization of numeric features.
+- **Correlations**: Most features are weakly correlated, but `NumOfProducts` and `IsActiveMember` show stronger relationships with churn.
+- **Data quality**: No missing values; all fields numeric or categorical strings, simplifying preprocessing.
+
+These findings directly inform the feature engineering baked into `src/data_prep.py` (ID column drops, label encoding, scaling) and the search spaces defined in `configs/hpo.yaml`.
+
+---
+
 ## What’s Implemented So Far
 
-### 1. Environment Setup
+### 1. Environment + Dependencies
 
 ```bash
 # Clone the repository
 git clone <repo-url>
 cd customer-churn-prediction-azureml
 
-# Create a Python 3.9 virtual environment (matches docker + AML images)
+# Create a Python 3.9 virtual environment (matches Docker + AML images)
 python3.9 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
@@ -109,29 +149,57 @@ pip install -r requirements.txt
 pip install -r dev-requirements.txt  # optional tooling (ruff, black, etc.)
 ```
 
+Deliverable: reproducible local environment aligned with the Dockerfile and registered Azure ML environment.
+
 ### 2. Azure ML Configuration
 
-`config.env` stores the workspace, resource group, ACR, and data asset names that all scripts/notebooks consume via `load_azure_config()`. Copy `config.env.example`, fill in your values, then authenticate with `az login`. No additional sourcing is required.
+- `config.env`: records subscription, resource group, workspace, ACR, and data asset names.
+- `az login`: authenticate once; every script/notebook loads `config.env` via `load_azure_config()` so no manual exporting is needed.
 
-### 3. Configuration Files
+Deliverable: all CLI scripts, notebooks, and AML jobs resolve credentials/resources consistently.
 
-`configs/data.yaml`, `train.yaml`, `hpo.yaml`, and `mlflow.yaml` drive data prep, training defaults, sweep budgets, and experiment naming. The notebook exports the winning HPO settings back into `train.yaml`, and `run_pipeline.py` consumes the same file for production retraining.
+### 3. Configuration-Driven Workflows
 
-### 4. Workflow Delivered
+- `configs/data.yaml` → referenced by `src/data_prep.py`/AML data prep component for column drops, categorical encoders, and split ratios.
+- `configs/hpo.yaml` → defines sweep search spaces/budgets for `notebooks/hpo_manual_trials.ipynb`.
+- `configs/train.yaml` → stores the “best” model + hyperparameters exported from the notebook; `run_pipeline.py` consumes it for retraining.
+- `configs/mlflow.yaml` → centralizes the experiment name used by both local and AML jobs.
 
-1. **HPO** – `notebooks/hpo_manual_trials.ipynb` submits Azure ML sweeps defined in `configs/hpo.yaml`, logs every trial to MLflow, and exports the best config to `configs/train.yaml`.
-2. **Production retraining** – `run_pipeline.py` (or its notebook cell) runs the data_prep → train pipeline with the exported settings, producing pickle + MLflow artifacts under `outputs/`.
-3. **Managed online endpoint** – `notebooks/deploy_online_endpoint.ipynb` discovers the newest MLflow bundle, registers it, deploys to a managed endpoint, and verifies predictions with `sample-data.json`.
+Deliverable: a single source of truth for every stage (prep, HPO, training, MLflow tracking).
 
-Together these steps complete the train → optimize → deploy loop already implemented in this repo.
+### 4. End-to-End Pipeline
 
-### 5. Inspect Experiments with MLflow
+| Stage | How it runs | Key artifacts |
+| --- | --- | --- |
+| **HPO** | `notebooks/hpo_manual_trials.ipynb` submits AML sweeps, monitors runs, exports best config into `configs/train.yaml`. | MLflow runs (one per trial), exported YAML with tuned hyperparameters. |
+| **Production retraining** | `python run_pipeline.py` (or notebook cell) submits the data_prep → train pipeline using the exported config. | `outputs/model_output/` (pickle model), `outputs/xgboost_mlflow/` (MLflow bundle), AML job logs under `Job_*`. |
+| **Managed online endpoint** | `notebooks/deploy_online_endpoint.ipynb` auto-discovers the latest MLflow bundle, registers it, deploys to AML managed endpoint, and invokes `sample-data.json`. | Registered model asset, managed endpoint + deployment, invocation logs showing logits/predictions. |
 
-If you mirror the MLflow tracking URI locally, launch the UI to explore runs:
+Together these deliverables cover the optimize → retrain → deploy loop currently implemented in the repo.
 
-```bash
-mlflow ui --backend-store-uri "${MLFLOW_TRACKING_URI}" --port 5000
-```
+![HPO Results](images/firefox_MBgOaXQ4KK.gif)
+
+![Training Results](images/firefox_mauvzMuxol.gif)
+
+![Online endpoint](images/firefox_oZhUmoljfc.gif)
+
+---
+
+## Evaluation Criteria Checklist
+
+| Requirement             | Evidence in this repo                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Problem description** | Project Overview explains the churn problem, target users, models, optimization path, and how the model is deployed/consumed.                                                                                                              |
+| **EDA**                 | `notebooks/eda.ipynb` performs range checks, class-imbalance analysis, feature correlations/importances, and explores categorical distributions; the “Exploratory Data Analysis” section summarizes the findings that guide preprocessing. |
+| **Model training**      | Multiple linear/tree models (`logreg`, `rf`, `xgboost`) are trained. Azure ML sweeps (defined in `configs/hpo.yaml`) tune hyperparameters such as depth, learning rate, estimators, etc., achieving the highest tier.                      |
+| **Notebook → script**   | Core training logic lives in `src/train.py`/`run_pipeline.py`; notebooks only orchestrate sweeps and deployments.                                                                                                                          |
+| **Reproducibility**     | Dataset (`data/churn.csv`) and model artifacts (`outputs/*`) are versioned. README documents environment setup, configuration, and pipeline execution for both local and AML runs.                                                         |
+| **Model deployment**    | `notebooks/deploy_online_endpoint.ipynb` registers MLflow bundles, provisions AML managed endpoints, and exposes invocation commands with `sample-data.json`.                                                                              |
+| **Dependencies & env**  | `requirements*.txt`, Dockerfile, and the virtual-env instructions in “What’s Implemented So Far” describe installation/activation, satisfying the top tier.                                                                                |
+| **Containerization**    | Dockerfile builds the runtime image used locally and in Azure ML; instructions below show how to build/run/tag/push it.                                                                                                                    |
+| **Cloud deployment**    | The deployment notebook is code-first documentation for pushing the model to Azure ML (cloud) and testing the public endpoint; the README links to it directly.                                                                            |
+
+---
 
 ## Running on Azure ML
 
@@ -141,6 +209,8 @@ mlflow ui --backend-store-uri "${MLFLOW_TRACKING_URI}" --port 5000
 
 All flows source workspace/data settings from `config.env`.
 
+---
+
 ## Documentation
 
 - `docs/MLZoomcamp-Project1-ProjectPlan-v2.md` – project plan and history
@@ -149,14 +219,42 @@ All flows source workspace/data settings from `config.env`.
 - `docs/dependencies.md` – guidance on dependency management and pinning
 - `docs/TROUBLESHOOTING.md` – common errors and solutions
 
-## Quick Reference
+---
 
-**HPO > Train > Deploy (summary):**
+## Docker Usage
 
-1. `notebooks/hpo_manual_trials.ipynb` → submit sweeps, export best config.
-2. `python run_pipeline.py` → run production training.
-3. `notebooks/deploy_online_endpoint.ipynb` → register + deploy MLflow bundle, smoke test predictions.
+```bash
+# Build the base image (same one referenced by AML environment)
+docker build -t bank-churn:1 .
+
+# Optional: run commands inside the container
+docker run --rm bank-churn:1 python src/train.py --config configs/train.yaml
+
+# Tag & push to Azure Container Registry
+docker tag bank-churn:1 <your-acr>.azurecr.io/bank-churn:1
+docker push <your-acr>.azurecr.io/bank-churn:1
+```
+
+Update `aml/environments/environment.yml` with the pushed image tag before re-registering the environment.
 
 ---
 
-Need help or want to extend the workflow? Open an issue or start a discussion!
+## Tech Stack
+
+- **Languages**: Python 3.9 (scripts + notebooks).
+- **Data & ML libraries**: pandas, NumPy, scikit-learn, XGBoost, imbalanced-learn.
+- **Experiment tracking**: MLflow (local `mlruns/` + Azure ML-backed runs).
+- **Orchestration**: Azure ML SDK v2, AML components (`aml/components/*.yaml`), `run_pipeline.py`.
+- **Deployment**: Azure ML managed online endpoints using MLflow bundles.
+- **Containerization**: Dockerfile (Python 3.9 base) + Azure Container Registry.
+- **Dev tooling**: pip/venv, `requirements*.txt`, `dev-requirements*.txt`, VS Code/Jupyter.
+
+---
+
+## Project Limitations & Future Work
+
+| Area | Current state | Future direction |
+| --- | --- | --- |
+| **Automated validation & CI** | Manual notebook verification; no unit tests/CI yet. | Add pytest suite + GitHub Actions to lint/test `src/` scripts, configs, and notebooks. |
+| **Monitoring & drift** | No production monitoring after deployment. | Integrate Application Insights or scheduled batch scoring to track drift, latency, and accuracy. |
+| **Deployment & registry lifecycle** | Single replica endpoint; models registered per run without promotion stages. | Add blue/green rollout logic, autoscaling policies, and MLflow/Azure ML registry stages (dev → staging → prod). |

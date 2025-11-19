@@ -1,5 +1,5 @@
 ################################################################################
-# TEST CONFIG (quick validation)
+## TEST CONFIG (quick validation)
 ################################################################################
 # experiment_name: "hpo-test"
 # sweep_display_name: "hpo-test"
@@ -47,7 +47,7 @@
 
 
 ################################################################################
-# PRODUCTION CONFIG (uncomment this block, comment out TEST above)
+## PRODUCTION CONFIG (uncomment this block, comment out TEST above)
 ################################################################################
 experiment_name: "hpo-prod"
 sweep_display_name: "hpo-prod"

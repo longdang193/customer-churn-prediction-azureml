@@ -1,4 +1,0 @@
-/usr/local/lib/python3.9/site-packages/sklearn/base.py:474: FutureWarning: `BaseEstimator._validate_data` is deprecated in 1.6 and will be removed in 1.7. Use `sklearn.utils.validation.validate_data` instead. This function becomes public and is part of the scikit-learn developer API.
-  warnings.warn(
-🏃 View run train_job at: https://southeastasia.api.azureml.ms/mlflow/v2.0/subscriptions/a23fa87c-802c-4fdf-9e59-e3d7969bcf31/resourceGroups/rg-churn-ml-project-2025-11-15/providers/Microsoft.MachineLearningServices/workspaces/churn-ml-workspace/#/experiments/7a3170ff-7a74-4af5-ba40-e6d1086cef2c/runs/d32cdeb9-3c2a-475e-93dd-a4cfcedcacc7
-🧪 View experiment at: https://southeastasia.api.azureml.ms/mlflow/v2.0/subscriptions/a23fa87c-802c-4fdf-9e59-e3d7969bcf31/resourceGroups/rg-churn-ml-project-2025-11-15/providers/Microsoft.MachineLearningServices/workspaces/churn-ml-workspace/#/experiments/7a3170ff-7a74-4af5-ba40-e6d1086cef2c

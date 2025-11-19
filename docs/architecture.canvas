@@ -1,0 +1,417 @@
+{
+  "nodes": [
+    {
+      "type": "text",
+      "id": "raw-data-asset",
+      "x": -848.6259347378683,
+      "y": -105.82784406561882,
+      "width": 260,
+      "height": 160,
+      "text": "Raw Data Asset\n(bank-churn-raw:1)\nAzure ML uri_folder"
+    },
+    {
+      "type": "text",
+      "id": "create-data-asset",
+      "x": -1494.977084457513,
+      "y": -193.61315597524205,
+      "width": 320,
+      "height": 240,
+      "text": "create_data_asset.py: [[setup/create_data_asset.py]]\n\n- **create_data_asset()**: Creates and registers a data asset in Azure ML\n- **main()**: CLI entry point that parses arguments and calls create_data_asset"
+    },
+    {
+      "type": "text",
+      "id": "configs-data",
+      "x": -431.8960707502374,
+      "y": -342.065329218107,
+      "width": 236.4569610164047,
+      "height": 155.31455847539294,
+      "text": "configs/data.yaml\n- Target column\n- Drops/categoricals\n- Split ratios"
+    },
+    {
+      "type": "text",
+      "id": "component-data-prep",
+      "x": -269.0892601801082,
+      "y": -58.22848050820235,
+      "width": 320,
+      "height": 200,
+      "text": "AML Component:\ndata_prep.yaml\n\nInput: raw_data (uri_folder)\nOutput: processed_data (uri_folder)"
+    },
+    {
+      "type": "text",
+      "id": "data-prep-script",
+      "x": -814.1603274086672,
+      "y": 226.2773407863395,
+      "width": 380,
+      "height": 280,
+      "text": "data_prep.py: [[src/data_prep.py]]\n\n- **prepare_data()**: Executes the end-to-end preprocessing pipeline\n- **main()**: CLI entry point that parses arguments and calls prepare_data"
+    },
+    {
+      "type": "text",
+      "id": "data-io",
+      "x": -1462.0645307756513,
+      "y": 255.24053876739413,
+      "width": 320,
+      "height": 240,
+      "text": "data_io.py: [[src/data/data_io.py]]\n\n- **load_data()**: Reads the raw CSV file(s) or directory containing CSV files (concatenates if multiple)\n- save_artifacts(): Saves all preprocessing artifacts (encoders, scaler, metadata) to disk\n- save_preprocessed_data(): Saves preprocessed training and test data to CSV files"
+    },
+    {
+      "type": "text",
+      "id": "preprocessing",
+      "x": -1278.362575707852,
+      "y": 573.5355578893581,
+      "width": 350.5109363145358,
+      "height": 301.7517508478978,
+      "text": "preprocessing.py: [[src/data/preprocessing.py]]\n\n- remove_columns(): Drops specified columns and returns the removed column names\n- **encode_categoricals()**: Label-encodes categorical columns, reusing encoders when provided\n- **scale_features()**: Standard-scores the numeric columns using StandardScaler"
+    },
+    {
+      "type": "text",
+      "id": "processed-data",
+      "x": 203.28466759829246,
+      "y": -50.14599720512267,
+      "width": 260,
+      "height": 200,
+      "text": "Processed Data\n(uri_folder)\n\nX_train/X_test\ny_train/y_test\nencoders.pkl · scaler.pkl\nmetadata.json"
+    },
+    {
+      "type": "text",
+      "id": "configs-train",
+      "x": 504.375,
+      "y": -268.7499999999999,
+      "width": 240,
+      "height": 140,
+      "text": "configs/train.yaml\n\nActive model + tuned\nhyperparameters"
+    },
+    {
+      "type": "text",
+      "id": "component-train",
+      "x": 587.768403343338,
+      "y": -16.846891514983085,
+      "width": 320,
+      "height": 220,
+      "text": "AML Component:\ntrain.yaml\n\n- Input: processed_data\n- Config: configs/train.yaml\n- Output:\n  - model_output (uri_folder)\n  - parent_run_id (uri_file)"
+    },
+    {
+      "type": "text",
+      "id": "train-script",
+      "x": 216.9413997072594,
+      "y": 304.0971265046763,
+      "width": 352.93574580439815,
+      "height": 183.92614293981478,
+      "text": "train.py: [[src/train.py]]\n\n- **main()**: CLI entry point that parses arguments, loads config, determines HPO mode, prepares hyperparameters, and orchestrates model training"
+    },
+    {
+      "type": "text",
+      "id": "training-module",
+      "x": 775.0605642098349,
+      "y": 577.4466059436897,
+      "width": 400,
+      "height": 320,
+      "text": "training.py: [[src/training/training.py]]\n\n- _model_artifact_path(): Returns the intermediate artifact path for a trained model\n- **train_model()**: Trains and evaluates a single model, logging to MLflow\n- **train_pipeline_stage()**: Trains a collection of models within a parent MLflow run"
+    },
+    {
+      "type": "text",
+      "id": "hyperparams-module",
+      "x": 1423.4760260500407,
+      "y": 230.26481135663465,
+      "width": 420,
+      "height": 360,
+      "text": "hyperparams.py: [[src/training/hyperparams.py]]\n\n- parse_override_value(): Parses override values passed via CLI\n- apply_param_overrides(): Applies CLI --set overrides to the loaded hyperparameters\n- **is_hpo_mode()**: Determines whether the current run is using hyperparameter optimization\n- **prepare_regular_hyperparams()**: Builds the full hyperparameter set from config + CLI overrides\n- **determine_models_to_train()**: Chooses which models to train (HPO: model_type, Regular: config['models'])"
+    },
+    {
+      "type": "text",
+      "id": "model-utils",
+      "x": 1139.4857059839214,
+      "y": 981.4375376442082,
+      "width": 380,
+      "height": 280,
+      "text": "model_utils.py: [[src/training/model_utils.py]]\n\n- **get_model()**: Returns a configured estimator instance based on model name\n- **apply_hyperparameters()**: Applies hyperparameters via set_params where supported\n- apply_class_weight_adjustments(): Adjusts XGBoost scale_pos_weight when class_weight='balanced'"
+    },
+    {
+      "type": "text",
+      "id": "data-utils",
+      "x": -203.9189899953421,
+      "y": 840.4281756803545,
+      "width": 320,
+      "height": 200,
+      "text": "data_utils.py: [[src/data/data_utils.py]]\n\n- **load_prepared_data()**: Loads preprocessed training and test data from CSV files\n- **apply_smote()**: Applies SMOTE to balance training labels"
+    },
+    {
+      "type": "text",
+      "id": "outputs",
+      "x": 958.2133777948773,
+      "y": -396.467766769264,
+      "width": 278,
+      "height": 242,
+      "text": "Pipeline Outputs\n\noutputs/model_output/\n- {model}_model.pkl\n- model_metadata.json\n\noutputs/xgboost_mlflow/\n - MLflow bundle"
+    },
+    {
+      "type": "text",
+      "id": "mlflow",
+      "x": 1082.412572009107,
+      "y": 63.13433883049953,
+      "width": 260,
+      "height": 200,
+      "text": "MLflow Tracking\n\nCaptures parameters,\nmetrics, signature, and\nartifacts for every run"
+    },
+    {
+      "type": "text",
+      "id": "notebook-main",
+      "x": -379.6042324402508,
+      "y": 327.7969070350168,
+      "width": 340,
+      "height": 220,
+      "color": "6",
+      "text": "notebooks/main.ipynb\n\n- Orchestrates data prep → train\n  pipeline via Azure ML\n- Registers components\n- Submits pipeline jobs\n- Monitors execution"
+    },
+    {
+      "type": "text",
+      "id": "run-pipeline",
+      "x": 251.88259812953652,
+      "y": 972.2875294303014,
+      "width": 418.75,
+      "height": 297.1875,
+      "text": "run_pipeline.py: [[run_pipeline.py]]\n\n- load_pipeline_components(): Loads AML components from the specified directory\n- define_pipeline(): Defines the Azure ML pipeline using the loaded components\n- get_pipeline_metadata(): Extracts optional experiment and display names from the training config\n- **main()**: Main function that loads config, creates ML client, and submits the pipeline job"
+    },
+    {
+      "type": "text",
+      "id": "notebook-deploy",
+      "x": 1445.9580104401612,
+      "y": -99.43028428819434,
+      "width": 340,
+      "height": 220,
+      "color": "6",
+      "text": "notebooks/deploy_online_endpoint.ipynb\n\n- Discovers latest MLflow bundle\n- Registers model in Azure ML\n- Creates managed online endpoint\n- Invokes with sample-data.json"
+    },
+    {
+      "type": "text",
+      "id": "configs-mlflow",
+      "x": 1280.1044934348995,
+      "y": 703.8814639398332,
+      "width": 240,
+      "height": 120,
+      "text": "configs/mlflow.yaml\n\nMLflow experiment\nconfiguration"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-register-data",
+      "fromNode": "create-data-asset",
+      "fromSide": "right",
+      "toNode": "raw-data-asset",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "registers"
+    },
+    {
+      "id": "edge-data-config",
+      "fromNode": "configs-data",
+      "fromSide": "right",
+      "toNode": "component-data-prep",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "configures"
+    },
+    {
+      "id": "edge-asset-prep",
+      "fromNode": "raw-data-asset",
+      "fromSide": "right",
+      "toNode": "component-data-prep",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "input"
+    },
+    {
+      "id": "edge-prep-script",
+      "fromNode": "data-prep-script",
+      "fromSide": "top",
+      "toNode": "component-data-prep",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "executes"
+    },
+    {
+      "id": "edge-data-io",
+      "fromNode": "data-io",
+      "fromSide": "right",
+      "toNode": "data-prep-script",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "uses"
+    },
+    {
+      "id": "edge-preprocessing",
+      "fromNode": "preprocessing",
+      "fromSide": "right",
+      "toNode": "data-prep-script",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "uses"
+    },
+    {
+      "id": "edge-prep-output",
+      "fromNode": "component-data-prep",
+      "fromSide": "right",
+      "toNode": "processed-data",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "produces"
+    },
+    {
+      "id": "edge-train-input",
+      "fromNode": "processed-data",
+      "fromSide": "right",
+      "toNode": "component-train",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "input"
+    },
+    {
+      "id": "edge-train-config",
+      "fromNode": "configs-train",
+      "fromSide": "bottom",
+      "toNode": "component-train",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "hyperparameters"
+    },
+    {
+      "id": "edge-train-script",
+      "fromNode": "train-script",
+      "fromSide": "top",
+      "toNode": "component-train",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "executes"
+    },
+    {
+      "id": "edge-training-module",
+      "fromNode": "training-module",
+      "fromSide": "left",
+      "toNode": "train-script",
+      "toSide": "right",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "uses"
+    },
+    {
+      "id": "edge-hyperparams",
+      "fromNode": "hyperparams-module",
+      "fromSide": "left",
+      "toNode": "train-script",
+      "toSide": "right",
+      "toEnd": "arrow",
+      "color": "#00ff00",
+      "label": "uses"
+    },
+    {
+      "id": "edge-model-utils",
+      "fromNode": "model-utils",
+      "fromSide": "top",
+      "toNode": "training-module",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "uses"
+    },
+    {
+      "id": "edge-data-utils",
+      "fromNode": "data-utils",
+      "fromSide": "right",
+      "toNode": "training-module",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "uses"
+    },
+    {
+      "id": "edge-train-output",
+      "fromNode": "component-train",
+      "fromSide": "right",
+      "toNode": "outputs",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "writes"
+    },
+    {
+      "id": "edge-mlflow",
+      "fromNode": "component-train",
+      "fromSide": "right",
+      "toNode": "mlflow",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "logs metrics/artifacts"
+    },
+    {
+      "id": "edge-pipeline-prep",
+      "fromNode": "notebook-main",
+      "fromSide": "top",
+      "toNode": "component-data-prep",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "orchestrates"
+    },
+    {
+      "id": "edge-pipeline-train",
+      "fromNode": "notebook-main",
+      "fromSide": "top",
+      "toNode": "component-train",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "orchestrates"
+    },
+    {
+      "id": "edge-pipeline-script-prep",
+      "fromNode": "run-pipeline",
+      "fromSide": "top",
+      "toNode": "component-data-prep",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "orchestrates"
+    },
+    {
+      "id": "edge-pipeline-script-train",
+      "fromNode": "run-pipeline",
+      "fromSide": "top",
+      "toNode": "component-train",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "orchestrates"
+    },
+    {
+      "id": "edge-deploy",
+      "fromNode": "outputs",
+      "fromSide": "bottom",
+      "toNode": "notebook-deploy",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "color": "#ff0000",
+      "label": "deploys MLflow bundle"
+    },
+    {
+      "id": "edge-mlflow-config",
+      "fromNode": "configs-mlflow",
+      "fromSide": "top",
+      "toNode": "component-train",
+      "toSide": "bottom",
+      "toEnd": "arrow",
+      "color": "#800080",
+      "label": "configures"
+    }
+  ]
+}
