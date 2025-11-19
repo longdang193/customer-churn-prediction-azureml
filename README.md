@@ -10,13 +10,14 @@ Configuration-driven Azure ML workflow for bank customer churn prediction. Hyper
 2. [Key Features](#key-features)
 3. [Project Structure](#project-structure)
 4. [Exploratory Data Analysis](#exploratory-data-analysis)
-5. [What’s Implemented So Far](#whats-implemented-so-far)
-6. [Evaluation Criteria Checklist](#evaluation-criteria-checklist)
-7. [Running on Azure ML](#running-on-azure-ml)
-8. [Documentation](#documentation)
-9. [Docker Usage](#docker-usage)
-10. [Tech Stack](#tech-stack)
-11. [Project Limitations & Future Work](#project-limitations--future-work)
+5. [Dataset](#dataset)
+6. [What's Implemented So Far](#whats-implemented-so-far)
+7. [Evaluation Criteria Checklist](#evaluation-criteria-checklist)
+8. [Running on Azure ML](#running-on-azure-ml)
+9. [Documentation](#documentation)
+10. [Docker Usage](#docker-usage)
+11. [Tech Stack](#tech-stack)
+12. [Project Limitations & Future Work](#project-limitations--future-work)
 
 ---
 
@@ -114,6 +115,32 @@ Configuration-driven Azure ML workflow for bank customer churn prediction. Hyper
 
 ---
 
+## Tech Stack
+
+- **Languages**: Python 3.9 (scripts + notebooks).
+- **Data & ML libraries**: pandas, NumPy, scikit-learn, XGBoost, imbalanced-learn.
+- **Experiment tracking**: MLflow (local `mlruns/` + Azure ML-backed runs).
+- **Orchestration**: Azure ML SDK v2, AML components (`aml/components/*.yaml`), `run_pipeline.py`.
+- **Deployment**: Azure ML managed online endpoints using MLflow bundles.
+- **Containerization**: Dockerfile (Python 3.9 base) + Azure Container Registry.
+- **Dev tooling**: pip/venv, `requirements*.txt`, `dev-requirements*.txt`, VS Code/Jupyter.
+
+---
+
+## Dataset
+
+The project uses the [Bank Customer Churn dataset from Kaggle](https://www.kaggle.com/datasets/mathchi/churn-for-bank-customers), containing **10,000 customer records** with 14 features:
+
+- **Customer identifiers**: `RowNumber`, `CustomerId`, `Surname` (dropped during preprocessing)
+- **Demographics**: `Geography` (France, Germany, Spain), `Gender` (Male/Female), `Age`
+- **Financial features**: `CreditScore`, `Balance`, `EstimatedSalary`, `Tenure` (years with bank)
+- **Product usage**: `NumOfProducts`, `HasCrCard` (0/1), `IsActiveMember` (0/1)
+- **Target variable**: `Exited` (0=stayed, 1=churned) — ~20% churn rate
+
+The dataset is stored in `data/churn.csv` and registered as an Azure ML data asset (`bank-churn-raw:1`) via `setup/create_data_asset.py`. See `data/README.md` for details on data asset registration and usage in pipelines.
+
+---
+
 ## Exploratory Data Analysis
 
 `notebooks/eda.ipynb` covers the initial exploration of the 10,000-row churn dataset:
@@ -130,7 +157,7 @@ These findings directly inform the feature engineering baked into `src/data_prep
 
 ---
 
-## What’s Implemented So Far
+## What's Implemented So Far
 
 ### 1. Environment + Dependencies
 
@@ -213,11 +240,16 @@ All flows source workspace/data settings from `config.env`.
 
 ## Documentation
 
-- `docs/MLZoomcamp-Project1-ProjectPlan-v2.md` – project plan and history
-- `docs/pipeline_guide.md` – deep dive into the scripts and components
-- `docs/setup_guide.md` – step-by-step setup instructions
-- `docs/dependencies.md` – guidance on dependency management and pinning
-- `docs/TROUBLESHOOTING.md` – common errors and solutions
+- `docs/MASTER_PLAN.md` – comprehensive project plan, structure, and step-by-step setup guide
+- `docs/TROUBLESHOOTING.md` – common errors and solutions for environment setup, Azure ML configuration, and deployment issues
+- `docs/pipeline_guide.md` – deep dive into pipeline scripts, components, and workflow orchestration
+- `docs/setup_guide.md` – step-by-step Azure ML workspace setup instructions
+- `docs/dependencies.md` – guidance on dependency management, pinning, and virtual environment setup
+- `docs/python_setup.md` – Python 3.9 installation instructions for different platforms
+- `docs/architecture.canvas` – visual architecture diagram (VS Code canvas format)
+- `setup/README.md` – Azure ML resource setup and data asset creation guide
+- `configs/README.md` – configuration file structure and usage
+- `aml/README.md` – Azure ML components and environments documentation
 
 ---
 
@@ -239,18 +271,6 @@ Update `aml/environments/environment.yml` with the pushed image tag before re-re
 
 ---
 
-## Tech Stack
-
-- **Languages**: Python 3.9 (scripts + notebooks).
-- **Data & ML libraries**: pandas, NumPy, scikit-learn, XGBoost, imbalanced-learn.
-- **Experiment tracking**: MLflow (local `mlruns/` + Azure ML-backed runs).
-- **Orchestration**: Azure ML SDK v2, AML components (`aml/components/*.yaml`), `run_pipeline.py`.
-- **Deployment**: Azure ML managed online endpoints using MLflow bundles.
-- **Containerization**: Dockerfile (Python 3.9 base) + Azure Container Registry.
-- **Dev tooling**: pip/venv, `requirements*.txt`, `dev-requirements*.txt`, VS Code/Jupyter.
-
----
-
 ## Project Limitations & Future Work
 
 | Area | Current state | Future direction |
@@ -258,3 +278,9 @@ Update `aml/environments/environment.yml` with the pushed image tag before re-re
 | **Automated validation & CI** | Manual notebook verification; no unit tests/CI yet. | Add pytest suite + GitHub Actions to lint/test `src/` scripts, configs, and notebooks. |
 | **Monitoring & drift** | No production monitoring after deployment. | Integrate Application Insights or scheduled batch scoring to track drift, latency, and accuracy. |
 | **Deployment & registry lifecycle** | Single replica endpoint; models registered per run without promotion stages. | Add blue/green rollout logic, autoscaling policies, and MLflow/Azure ML registry stages (dev → staging → prod). |
+
+---
+
+## Acknowledgments
+
+I would like to thank [DataTalks.Club](https://datatalks.club/) for offering this Machine Learning course completely free. This project was developed as part of their comprehensive ML curriculum, which provides excellent resources and guidance for learning machine learning engineering and MLOps practices.
